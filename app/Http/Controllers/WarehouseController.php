@@ -27,7 +27,7 @@ class WarehouseController extends Controller
     // --- DASHBOARD ---
     public function dashboard() { return view('warehouse.dashboard'); }
 
-    // --- LIST SALES ORDER (DENGAN CROSS-CHECK DO) ---
+    // --- LIST SALES ORDER ---
     public function scanSO() {
         $token = $this->getStoredToken();
         $session = $this->getStoredSession();
@@ -40,26 +40,29 @@ class WarehouseController extends Controller
         $resSO = Http::withHeaders([
             'Authorization' => 'Bearer ' . $token,
             'X-Session-ID' => $session['session']
-        ])->get($urlSO, [
+        ])
+        ->timeout(60) // Tambahan: Anti Timeout
+        ->get($urlSO, [
             'fields' => 'id,number,transDate,customer,totalAmount,status',
             'sort' => 'transDate desc'
         ]);
         $listSO = $resSO->json()['d'] ?? [];
 
-        // 2. AMBIL LIST DO TERBARU (Untuk "Kunci Jawaban" Status)
-        // Ini trik agar status di Laravel langsung berubah "Diproses" meskipun API Accurate delay
+        // 2. AMBIL LIST DO TERBARU (Untuk Cek Status Lokal)
         $urlDO = $session['host'] . '/accurate/api/delivery-order/list.do';
         $resDO = Http::withHeaders([
             'Authorization' => 'Bearer ' . $token,
             'X-Session-ID' => $session['session']
-        ])->get($urlDO, [
+        ])
+        ->timeout(60)
+        ->get($urlDO, [
             'fields' => 'salesOrderDocNo', 
             'sort' => 'transDate desc',
             'pageSize' => 50 
         ]);
         $listDO = $resDO->json()['d'] ?? [];
 
-        // Kumpulkan Nomor SO yang sudah punya DO
+        // Kumpulkan Nomor SO yang sudah ada DO-nya
         $processedSONumbers = [];
         foreach ($listDO as $do) {
             if (!empty($do['salesOrderDocNo'])) {
@@ -69,7 +72,7 @@ class WarehouseController extends Controller
 
         return view('warehouse.scan-so', [
             'orders' => $listSO,
-            'processed_numbers' => $processedSONumbers // Kirim data ini ke View
+            'processed_numbers' => $processedSONumbers
         ]);
     }
 
@@ -83,10 +86,13 @@ class WarehouseController extends Controller
         $so = Http::withHeaders([
             'Authorization' => 'Bearer ' . $token,
             'X-Session-ID' => $session['session']
-        ])->get($url, ['id' => $id])->json()['d'] ?? null;
+        ])
+        ->timeout(60)
+        ->get($url, ['id' => $id])->json()['d'] ?? null;
 
         if (!$so) return redirect('/scan-so')->with('error', 'Gagal load data SO');
-        if (($so['status'] ?? '') === 'CLOSED') return redirect('/scan-so')->with('error', 'SO Sudah Selesai (Closed)');
+        // Backdoor: Tetap izinkan masuk meski status CLOSED/PROCESSED untuk pengecekan
+        // if (($so['status'] ?? '') === 'CLOSED') return redirect('/scan-so')->with('error', 'SO Sudah Selesai (Closed)');
 
         // Cek Stok Gudang
         foreach ($so['detailItem'] as &$item) {
@@ -94,7 +100,9 @@ class WarehouseController extends Controller
             $stokRes = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'X-Session-ID' => $session['session']
-            ])->get($session['host'] . '/accurate/api/item/list.do', [
+            ])
+            ->timeout(30)
+            ->get($session['host'] . '/accurate/api/item/list.do', [
                 'fields' => 'quantity', 'filter.no.op' => 'EQUAL', 'filter.no.val' => $itemNo
             ])->json()['d'][0] ?? [];
             
@@ -104,7 +112,7 @@ class WarehouseController extends Controller
         return view('warehouse.scan-process', ['so' => $so]);
     }
 
-    // --- SUBMIT DO (LOGIKA "AMBIL PESANAN" - FIX FINAL) ---
+    // --- SUBMIT DO (PERBAIKAN: DATA LENGKAP & GUDANG) ---
     public function submitDeliveryOrder(Request $request) {
         $token = $this->getStoredToken();
         $session = $this->getStoredSession();
@@ -113,87 +121,105 @@ class WarehouseController extends Controller
         $host = $session['host'];
         $sessionId = $session['session'];
         
-        // 1. Cari ID SO dulu
-        $urlList = $host . '/accurate/api/sales-order/list.do';
-        $resList = Http::withHeaders(['Authorization' => 'Bearer '.$token, 'X-Session-ID' => $sessionId])
-            ->get($urlList, ['filter.number.op' => 'EQUAL', 'filter.number.val' => $request->so_number, 'fields' => 'id']);
-        
-        $soId = $resList->json()['d'][0]['id'] ?? null;
-        if (!$soId) return response()->json(['success' => false, 'message' => 'SO Tidak Ditemukan.']);
+        try {
+            // 1. Cari ID SO
+            $urlList = $host . '/accurate/api/sales-order/list.do';
+            $resList = Http::withHeaders(['Authorization' => 'Bearer '.$token, 'X-Session-ID' => $sessionId])
+                ->timeout(60)
+                ->get($urlList, ['filter.number.op' => 'EQUAL', 'filter.number.val' => $request->so_number, 'fields' => 'id']);
+            
+            $soId = $resList->json()['d'][0]['id'] ?? null;
+            if (!$soId) return response()->json(['success' => false, 'message' => 'SO Tidak Ditemukan.']);
 
-        // 2. Ambil Detail SO Lengkap (Parent)
-        $urlDetail = $host . '/accurate/api/sales-order/detail.do';
-        $resDetail = Http::withHeaders(['Authorization' => 'Bearer '.$token, 'X-Session-ID' => $sessionId])
-            ->get($urlDetail, ['id' => $soId]);
-        
-        $soData = $resDetail->json()['d'];
-        
-        // 3. Mapping Data: Simpan baris SO lengkap sebagai referensi
-        $soLines = [];
-        foreach($soData['detailItem'] as $line) {
-            $itemCode = trim($line['item']['no']);
-            $soLines[$itemCode] = $line;
-        }
+            // 2. Ambil Detail SO Lengkap (Parent)
+            $urlDetail = $host . '/accurate/api/sales-order/detail.do';
+            $resDetail = Http::withHeaders(['Authorization' => 'Bearer '.$token, 'X-Session-ID' => $sessionId])
+                ->timeout(60)
+                ->get($urlDetail, ['id' => $soId]);
+            
+            $soData = $resDetail->json()['d'];
+            
+            // Ambil Customer dari SO langsung (Lebih Aman)
+            $validCustomerNo = $soData['customer']['customerNo'] ?? null;
+            if(!$validCustomerNo) return response()->json(['success' => false, 'message' => 'Data Customer SO invalid.']);
 
-        $itemsScanned = $request->items; 
-        $detailItemPayload = [];
+            // 3. Mapping Data (Simpan baris SO lengkap)
+            $soLines = [];
+            foreach($soData['detailItem'] as $line) {
+                $itemCode = trim($line['item']['no']);
+                $soLines[$itemCode] = $line;
+            }
 
-        foreach ($itemsScanned as $sku => $qty) {
-            if ((int)$qty > 0) {
-                $cleanSku = trim($sku);
+            $itemsScanned = $request->items; 
+            $detailItemPayload = [];
 
-                // Cek: Apakah barang scan ada di SO?
-                if (isset($soLines[$cleanSku])) {
-                    $targetLine = $soLines[$cleanSku];
+            foreach ($itemsScanned as $sku => $qty) {
+                if ((int)$qty > 0) {
+                    $cleanSku = trim($sku);
 
-                    $detailItemPayload[] = [
-                        'itemNo' => $cleanSku,
-                        'quantity' => (int)$qty,
-                        
-                        // [RAHASIA SUKSES] 
-                        // Kirim ID Baris SO (Seperti tombol "Ambil")
-                        'salesOrderDetailId' => $targetLine['id'],
-                        
-                        // [EXTRA PROTEKSI]
-                        // Kirim No SO di setiap baris agar Surat Jalan muncul No SO-nya
-                        'salesOrderDocNo' => $request->so_number,
+                    // Pastikan barang ada di SO
+                    if (isset($soLines[$cleanSku])) {
+                        $targetLine = $soLines[$cleanSku];
 
-                        // [COPY PASTE]
-                        // Salin Satuan dari SO agar Accurate tidak bingung
-                        'itemUnit' => [
-                            'name' => $targetLine['itemUnit']['name'] ?? 'PCS'
-                        ]
-                    ];
-                } else {
-                    return response()->json(['success' => false, 'message' => "Barang '$sku' tidak ada di SO ini!"]);
+                        $detailItemPayload[] = [
+                            'itemNo' => $cleanSku,
+                            'quantity' => (int)$qty,
+                            
+                            // [PERBAIKAN 1] ID harus Integer
+                            'salesOrderDetailId' => (int)$targetLine['id'],
+                            
+                            // [PERBAIKAN 2] Copy Satuan
+                            'itemUnit' => [
+                                'name' => $targetLine['itemUnit']['name'] ?? 'PCS'
+                            ],
+
+                            // [PERBAIKAN 3 - KRUSIAL] COPY GUDANG DARI SO
+                            // Tanpa ini, Accurate sering membuat DO terpisah (orphan)
+                            'warehouse' => isset($targetLine['warehouse']) ? ['id' => $targetLine['warehouse']['id']] : null,
+                            
+                            // [OPSIONAL] Copy Departemen & Proyek jika ada
+                            'department' => isset($targetLine['department']) ? ['id' => $targetLine['department']['id']] : null,
+                            'project' => isset($targetLine['project']) ? ['id' => $targetLine['project']['id']] : null,
+                        ];
+                    } 
                 }
             }
-        }
 
-        if (empty($detailItemPayload)) {
-            return response()->json(['success' => false, 'message' => 'Tidak ada barang valid untuk diproses.']);
-        }
+            if (empty($detailItemPayload)) {
+                return response()->json(['success' => false, 'message' => 'Tidak ada barang valid untuk diproses.']);
+            }
 
-        // 4. Kirim DO
-        $urlSave = $host . '/accurate/api/delivery-order/save.do';
-        $res = Http::withHeaders(['Authorization' => 'Bearer '.$token, 'X-Session-ID' => $sessionId])
-            ->post($urlSave, [
-                'transDate' => date('d/m/Y'), 
-                'customerNo' => $request->customer_no,
-                'detailItem' => $detailItemPayload,
-                'description' => 'DO Laravel (Link SO: ' . $request->so_number . ')'
-            ])->json();
+            // 4. Kirim DO
+            $urlSave = $host . '/accurate/api/delivery-order/save.do';
+            $res = Http::withHeaders(['Authorization' => 'Bearer '.$token, 'X-Session-ID' => $sessionId])
+                ->timeout(60)
+                ->post($urlSave, [
+                    'transDate' => date('d/m/Y'), 
+                    'customerNo' => $validCustomerNo, // Pakai Customer SO
+                    'detailItem' => $detailItemPayload,
+                    'description' => 'DO Scan Auto-Link: ' . $request->so_number
+                ]);
 
-        if (isset($res['r'])) {
-            return response()->json([
-                'success' => true, 
-                'do_number' => $res['r']['number'], 
-                'do_id' => $res['r']['id']
-            ]);
-        } else {
-            $errMsg = $res['d'] ?? 'Gagal Unknown';
-            if(is_array($errMsg)) $errMsg = implode(', ', $errMsg);
-            return response()->json(['success' => false, 'message' => $errMsg]);
+            if ($res->failed()) {
+                return response()->json(['success' => false, 'message' => 'Koneksi Accurate Gagal: ' . $res->status()]);
+            }
+
+            $result = $res->json();
+
+            if (isset($result['r'])) {
+                return response()->json([
+                    'success' => true, 
+                    'do_number' => $result['r']['number'], 
+                    'do_id' => $result['r']['id']
+                ]);
+            } else {
+                $errMsg = $result['d'] ?? 'Gagal Unknown';
+                if(is_array($errMsg)) $errMsg = implode(', ', $errMsg);
+                return response()->json(['success' => false, 'message' => $errMsg]);
+            }
+
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'System Error: ' . $e->getMessage()]);
         }
     }
 
@@ -214,7 +240,9 @@ class WarehouseController extends Controller
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'X-Session-ID' => $sessionId
-            ])->get($url, ['id' => $id]);
+            ])
+            ->timeout(60)
+            ->get($url, ['id' => $id]);
 
             if ($response->successful()) {
                 $data = $response->json();

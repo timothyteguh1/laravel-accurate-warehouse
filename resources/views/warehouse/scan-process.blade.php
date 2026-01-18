@@ -102,8 +102,8 @@
 <script>
     let itemCounts = {}; 
     const soNumber = "{{ $so['number'] }}";
-    const customerNo = "{{ $so['customer']['customerNo'] ?? $so['customer']['no'] ?? 'P.00001' }}";
-
+    // Data customerNo tidak lagi diambil dari sini untuk DO, tapi ditangani Controller demi keamanan
+    
     @foreach($so['detailItem'] as $item)
         itemCounts['{{ $item['item']['no'] }}'] = 0;
     @endforeach
@@ -217,9 +217,12 @@
     }
 
     function kirimKeAccurate() {
+        // [FIX] Matikan focus pada input agar tidak konflik dengan SweetAlert (Aria Hidden Warning)
+        if (inputEl) inputEl.blur();
+
         Swal.fire({
             title: 'Memproses DO...',
-            html: 'Mengirim data ke Accurate...',
+            html: 'Mengirim data ke Accurate...<br><small>Mohon tunggu maksimal 60 detik</small>',
             allowOutsideClick: false,
             didOpen: () => { Swal.showLoading() }
         });
@@ -234,7 +237,7 @@
             body: JSON.stringify({
                 so_id: "{{ $so['id'] }}",
                 so_number: soNumber,
-                customer_no: customerNo,
+                // Customer No dihapus dari sini, biarkan Controller yang ambil dari SO asli
                 items: itemCounts
             })
         })
@@ -247,8 +250,6 @@
         })
         .then(data => {
             if (data.success) {
-                
-                // --- POPUP SUKSES ---
                 Swal.fire({
                     icon: 'success',
                     title: 'DO Berhasil Dibuat!',
@@ -268,35 +269,37 @@
                     allowOutsideClick: false
                 }).then((result) => {
                     if (result.isConfirmed) {
-                        // DOWNLOAD PDF (Buka di Tab Baru)
                         const urlPDF = `{{ url('/print-do') }}/${data.do_id}`;
                         window.open(urlPDF, '_blank');
-                        
-                        // Redirect ke halaman list agar status terupdate
-                        setTimeout(() => {
-                            window.location.href = "{{ url('/scan-so') }}";
-                        }, 2000); 
+                        setTimeout(() => { window.location.href = "{{ url('/scan-so') }}"; }, 2000); 
                     } else {
-                        // User klik Kembali
                         window.location.href = "{{ url('/scan-so') }}";
                     }
                 });
-
             } else {
                 Swal.fire('Gagal!', data.message, 'error');
+                // Kembalikan fokus jika gagal
+                if(inputEl) inputEl.focus();
             }
         })
         .catch(err => {
-            console.error(err);
+            // [FIX] Tampilkan error di console log sesuai permintaan
+            console.error("DEBUG ERROR LARAVEL:", err);
+            
             Swal.fire({
                 icon: 'error',
                 title: 'Gagal Kirim',
                 text: err.message,
-                footer: 'Cek koneksi internet atau login ulang Accurate.'
+                footer: 'Cek Console (F12) untuk detail error.'
             });
+            // Kembalikan fokus
+            if(inputEl) inputEl.focus();
         });
     }
 
-    window.onload = function() { inputEl.focus(); }
+    // Auto Focus saat halaman dimuat
+    window.onload = function() { 
+        if(inputEl) inputEl.focus(); 
+    }
 </script>
 @endsection
