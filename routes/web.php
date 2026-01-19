@@ -4,7 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AccurateTestController;
 use App\Http\Controllers\WarehouseController;
 use App\Http\Controllers\SalesOrderController;
-
+use App\Http\Controllers\InventoryController;
 /*
 |--------------------------------------------------------------------------
 | Web Routes
@@ -47,4 +47,10 @@ Route::middleware(['web'])->group(function () {
     // Setup Dummy (Optional)
     Route::get('/setup-data', [WarehouseController::class, 'generateDummyData']);
     Route::get('/setup-stock', [WarehouseController::class, 'fillDummyStock']);
+
+    // Riwayat (SO Closed)
+    Route::get('/history-do', [WarehouseController::class, 'historyDOPage']);
+    Route::get('/find-do-print/{soNumber}', [WarehouseController::class, 'searchAndPrintDO']);
+    // --- INVENTORY LIST FROM ACCURATE ---
+    Route::get('/inventory', [InventoryController::class, 'index']);
 });

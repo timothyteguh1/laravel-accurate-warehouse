@@ -26,10 +26,83 @@ class WarehouseController extends Controller
         ];
     }
 
-    public function dashboard()
-    {
-        return view('warehouse.dashboard');
+    // Tambahkan atau update method dashboard di WarehouseController.php
+public function dashboard()
+{
+    $auth = $this->getAuthData();
+    if (!$auth) return redirect('/accurate/login');
+
+    try {
+        // 1. STATISTIK: SO Menunggu (Status NOT CLOSED)
+        $soRes = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $auth['token'], 
+            'X-Session-ID' => $auth['session']
+        ])->get($auth['host'] . '/accurate/api/sales-order/list.do', [
+            'fields' => 'id',
+            'filter.status.op' => 'NOT_EQUAL', 
+            'filter.status.val' => 'CLOSED',
+            'sp.pageSize' => 1 
+        ]);
+
+        // 2. STATISTIK: Pengiriman (DO) Hari Ini
+        $doRes = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $auth['token'], 
+            'X-Session-ID' => $auth['session']
+        ])->get($auth['host'] . '/accurate/api/delivery-order/list.do', [
+            'fields' => 'id',
+            'filter.transDate.op' => 'EQUAL',
+            'filter.transDate.val' => date('d/m/Y'),
+            'sp.pageSize' => 1
+        ]);
+
+        // 3. STATISTIK: Total Item di Accurate
+        $itemRes = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $auth['token'], 
+            'X-Session-ID' => $auth['session']
+        ])->get($auth['host'] . '/accurate/api/item/list.do', [
+            'fields' => 'id',
+            'sp.pageSize' => 1
+        ]);
+
+        // 4. DATA GRAFIK: 7 Hari Terakhir
+        $chartLabels = [];
+        $chartData = [];
+        
+        for ($i = 6; $i >= 0; $i--) {
+            $dateObj = now()->subDays($i);
+            $dateStr = $dateObj->format('d/m/Y');
+            $chartLabels[] = $dateObj->format('d M');
+
+            $resChart = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $auth['token'], 
+                'X-Session-ID' => $auth['session']
+            ])->get($auth['host'] . '/accurate/api/delivery-order/list.do', [
+                'fields' => 'id',
+                'filter.transDate.op' => 'EQUAL',
+                'filter.transDate.val' => $dateStr,
+                'sp.pageSize' => 1
+            ]);
+            
+            $chartData[] = $resChart->json()['sp']['rowCount'] ?? 0;
+        }
+
+        $stats = [
+            'pending_so' => $soRes->json()['sp']['rowCount'] ?? 0,
+            'today_do'   => $doRes->json()['sp']['rowCount'] ?? 0,
+            'total_items'=> $itemRes->json()['sp']['rowCount'] ?? 0,
+        ];
+
+        return view('warehouse.dashboard', compact('stats', 'chartLabels', 'chartData'));
+
+    } catch (\Exception $e) {
+        \Log::error("Dashboard Error: " . $e->getMessage());
+        return view('warehouse.dashboard', [
+            'stats' => ['pending_so' => 0, 'today_do' => 0, 'total_items' => 0],
+            'chartLabels' => [],
+            'chartData' => []
+        ]);
     }
+}
 
     // 1. HALAMAN LIST SO
     public function scanSOListPage()
@@ -110,7 +183,7 @@ class WarehouseController extends Controller
         }
     }
 
-    // 3. PROSES SUBMIT DO + MANUAL CLOSE (DENGAN ENDPOINT BARU)
+    // 3. PROSES SUBMIT DO + MANUAL CLOSE
     public function submitDOWithLocalLookup(Request $request)
     {
         $soNumber = $request->so_number;
@@ -148,8 +221,8 @@ class WarehouseController extends Controller
 
                 if ($qtyScan > 0) {
                     $linePayload = [
-                        'itemNo' => $accSku, // FIX: Wajib Ada
-                        'salesOrderDetailId' => $accLine['id'], // Link ke SO
+                        'itemNo' => $accSku,
+                        'salesOrderDetailId' => $accLine['id'],
                         'quantity' => $qtyScan,
                         'itemUnit' => $accLine['itemUnit'] ?? null,
                     ];
@@ -188,13 +261,12 @@ class WarehouseController extends Controller
             // === JIKA DO SUKSES ===
             if (isset($result['r'])) {
                 
-                // --- D. FORCE CLOSE (METODE BARU: MANUAL CLOSE ENDPOINT) ---
-                // Sesuai dokumentasi yang ditemukan: /api/sales-order/manual-close-order.do
+                // --- D. FORCE CLOSE ---
                 try {
                     $closeUrl = $auth['host'] . '/accurate/api/sales-order/manual-close-order.do';
                     
                     $closePayload = [
-                        'number' => $soNumber, // Pakai Nomor SO (String) sesuai dokumentasi
+                        'number' => $soNumber,
                         'orderClosed' => true
                     ];
 
@@ -203,9 +275,6 @@ class WarehouseController extends Controller
                         'X-Session-ID' => $auth['session']
                     ])->post($closeUrl, $closePayload);
                     
-                    // Kita tidak perlu cek hasil close dengan ketat, 
-                    // karena tujuan utama (DO) sudah tercapai.
-                    // Tapi ini log untuk jaga-jaga.
                     $closeResult = $closeRes->json();
                     if (!isset($closeResult['r'])) {
                          Log::warning('Manual Close SO Warning: ' . json_encode($closeResult));
@@ -215,7 +284,7 @@ class WarehouseController extends Controller
                     // Ignore error close
                 }
 
-                // Update DB Lokal
+                // Update DB Lokal (Tetap dibiarkan sesuai request)
                 DB::table('local_so_details')
                     ->where('so_number', $soNumber)
                     ->update(['status' => 'CLOSED', 'updated_at' => now()]);
@@ -252,6 +321,105 @@ class WarehouseController extends Controller
             if (empty($data['d'])) return response("Data DO tidak ditemukan.", 404);
 
             return view('warehouse.print-do', ['do' => $data['d']]);
+        } catch (\Exception $e) {
+            return response("Error: " . $e->getMessage(), 500);
+        }
+    }
+
+// --- [UPDATE] HALAMAN RIWAYAT: SOURCE DARI SO CLOSED ---
+    public function historyDOPage(Request $request)
+    {
+        $auth = $this->getAuthData();
+        if (!$auth) return redirect('/accurate/login');
+
+        // UBAH ENDPOINT: Gunakan Sales Order List
+        $url = $auth['host'] . '/accurate/api/sales-order/list.do';
+        
+        try {
+            // FILTER: Hanya ambil SO yang statusnya CLOSED
+            // Ini menjamin jika SO dibuka lagi (uncheck closed), dia hilang dari list ini.
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $auth['token'], 
+                'X-Session-ID' => $auth['session']
+            ])->get($url, [
+                'fields' => 'id,number,transDate,customer,description,status,totalAmount', 
+                'filter.status.op' => 'EQUAL',
+                'filter.status.val' => 'CLOSED', // <--- KUNCI FILTER STATUS
+                'sort'   => 'transDate desc',
+                'sp.pageSize' => 20,
+                'sp.page' => $request->query('page', 1) 
+            ]);
+
+            if ($response->failed()) {
+                return redirect()->back()->with('error', 'Gagal ambil data SO.');
+            }
+
+            $data = $response->json();
+            $orders = $data['d'] ?? [];
+            if (!is_array($orders)) $orders = [];
+            
+            $pagination = $data['sp'] ?? [];
+
+            return view('warehouse.history-api', [
+                'orders' => $orders,
+                'page' => $pagination['page'] ?? 1
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('History Error: ' . $e->getMessage());
+            return redirect('/dashboard')->with('error', 'Terjadi kesalahan sistem.');
+        }
+    }
+
+    // --- [BARU] CARI DO BERDASARKAN NO SO LALU PRINT ---
+    // Dipanggil saat user klik "Print SJ" di halaman riwayat
+    // --- [FIX] CARI ID DO BERDASARKAN NOMOR SO LALU PRINT ---
+    public function searchAndPrintDO($soNumber)
+    {
+        $auth = $this->getAuthData();
+        if (!$auth) return redirect('/accurate/login');
+
+        // URL untuk list Delivery Order
+        $url = $auth['host'] . '/accurate/api/delivery-order/list.do';
+        
+        try {
+            // 1. Ambil list DO (kita ambil 100 terakhir agar pencarian lebih akurat)
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $auth['token'], 
+                'X-Session-ID' => $auth['session']
+            ])->get($url, [
+                'fields' => 'id,number,description', // Kita butuh ID dan Description
+                'sort'   => 'transDate desc',
+                'sp.pageSize' => 100 
+            ]);
+
+            $doList = $response->json()['d'] ?? [];
+
+            // 2. Cari di dalam list DO, mana yang deskripsinya mengandung $soNumber
+            $foundDOId = null;
+            foreach ($doList as $do) {
+                // Cek apakah di keterangan DO ada nomor SO-nya
+                if (isset($do['description']) && str_contains($do['description'], $soNumber)) {
+                    $foundDOId = $do['id']; // Ambil ID DO-nya
+                    break; 
+                }
+            }
+
+            // 3. Jika ketemu ID DO, jalankan fungsi printDeliveryOrder menggunakan ID tersebut
+            if ($foundDOId) {
+                return $this->printDeliveryOrder($foundDOId);
+            } else {
+                // Jika tidak ketemu, tampilkan pesan error yang informatif
+                return response("
+                    <div style='font-family:sans-serif; text-align:center; margin-top:50px;'>
+                        <h2 style='color:red;'>Surat Jalan Tidak Ditemukan</h2>
+                        <p>Tidak ditemukan Delivery Order yang mencantumkan <b>$soNumber</b> di keterangannya.</p>
+                        <p>Pastikan Surat Jalan sudah dibuat melalui aplikasi ini.</p>
+                        <a href='javascript:history.back()'>Kembali</a>
+                    </div>
+                ", 404);
+            }
+
         } catch (\Exception $e) {
             return response("Error: " . $e->getMessage(), 500);
         }

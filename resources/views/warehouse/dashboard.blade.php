@@ -1,98 +1,157 @@
 @extends('layouts.master')
 
-@section('title', 'Dashboard')
-@section('header_title', 'Dashboard')
+@section('header', 'Dashboard Gudang')
 
 @section('content')
-<div class="row g-4 mb-4">
-    <div class="col-md-3">
-        <div class="stat-card">
-            <div class="d-flex justify-content-between">
-                <div class="bg-primary bg-opacity-10 p-2 rounded text-primary">
-                    <i class="fa-solid fa-box fa-lg"></i>
+<div class="container-fluid">
+    <div class="row g-4 mb-4">
+        <div class="col-md-4">
+            <div class="card card-custom border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="bg-primary bg-opacity-10 text-primary p-3 rounded-3 me-3">
+                            <i class="fa-solid fa-file-invoice fa-2x"></i>
+                        </div>
+                        <div>
+                            <h6 class="text-muted mb-1">SO Belum Diproses</h6>
+                            <h3 class="fw-bold mb-0">{{ $stats['pending_so'] }}</h3>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <a href="{{ url('/scan-so') }}" class="text-primary text-decoration-none small fw-bold">
+                            Mulai Scan Sekarang <i class="fa-solid fa-arrow-right ms-1"></i>
+                        </a>
+                    </div>
                 </div>
-                <span class="text-success small fw-bold">+12%</span>
             </div>
-            <div class="stat-value">24</div>
-            <div class="stat-label">Total SO Hari Ini</div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card card-custom border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="bg-success bg-opacity-10 text-success p-3 rounded-3 me-3">
+                            <i class="fa-solid fa-truck-fast fa-2x"></i>
+                        </div>
+                        <div>
+                            <h6 class="text-muted mb-1">Pengiriman Hari Ini</h6>
+                            <h3 class="fw-bold mb-0">{{ $stats['today_do'] }}</h3>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <a href="{{ url('/history-do') }}" class="text-success text-decoration-none small fw-bold">
+                            Lihat Riwayat SO <i class="fa-solid fa-arrow-right ms-1"></i>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card card-custom border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="bg-info bg-opacity-10 text-info p-3 rounded-3 me-3">
+                            <i class="fa-solid fa-boxes-stacked fa-2x"></i>
+                        </div>
+                        <div>
+                            <h6 class="text-muted mb-1">Total Master Barang</h6>
+                            <h3 class="fw-bold mb-0">{{ $stats['total_items'] }}</h3>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <a href="{{ url('/inventory') }}" class="text-info text-decoration-none small fw-bold">
+                            Cek Inventori <i class="fa-solid fa-arrow-right ms-1"></i>
+                        </a>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="stat-card">
-            <div class="d-flex justify-content-between">
-                <div class="bg-success bg-opacity-10 p-2 rounded text-success">
-                    <i class="fa-solid fa-check-circle fa-lg"></i>
+
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div class="card card-custom border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h5 class="fw-bold mb-4">Tren Pengiriman (7 Hari Terakhir)</h5>
+                    <div style="height: 320px;">
+                        <canvas id="deliveryChart"></canvas>
+                    </div>
                 </div>
-                <span class="text-success small fw-bold">+8%</span>
             </div>
-            <div class="stat-value">18</div>
-            <div class="stat-label">SO Selesai</div>
         </div>
-    </div>
-    <div class="col-md-3">
-        <div class="stat-card">
-            <div class="d-flex justify-content-between">
-                <div class="bg-warning bg-opacity-10 p-2 rounded text-warning">
-                    <i class="fa-solid fa-clock fa-lg"></i>
+
+        <div class="col-lg-4">
+            <div class="card card-custom border-0 shadow-sm h-100">
+                <div class="card-body d-flex flex-column">
+                    <h5 class="fw-bold mb-3">Status Integrasi</h5>
+                    <div class="flex-grow-1">
+                        <div class="d-flex justify-content-between mb-3 border-bottom pb-2">
+                            <span class="text-muted">API Accurate</span>
+                            <span class="badge bg-success rounded-pill">Terkoneksi</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-3 border-bottom pb-2">
+                            <span class="text-muted">Host</span>
+                            <span class="text-dark small">accurate.id</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-3 border-bottom pb-2">
+                            <span class="text-muted">Waktu Server</span>
+                            <span class="text-dark">{{ date('H:i') }} WIB</span>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-light p-3 rounded-3 mt-3">
+                        <p class="small text-muted mb-0">
+                            <i class="fa-solid fa-circle-info me-1"></i> 
+                            Data ditarik secara real-time dari Accurate Online API.
+                        </p>
+                    </div>
+                    
+                    <button onclick="window.location.reload()" class="btn btn-outline-primary w-100 mt-3">
+                        <i class="fa-solid fa-sync me-2"></i> Refresh Dashboard
+                    </button>
                 </div>
-                <span class="text-danger small fw-bold">-3%</span>
             </div>
-            <div class="stat-value">6</div>
-            <div class="stat-label">SO Pending</div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="stat-card">
-            <div class="d-flex justify-content-between">
-                <div class="bg-info bg-opacity-10 p-2 rounded text-info">
-                    <i class="fa-solid fa-chart-line fa-lg"></i>
-                </div>
-                <span class="text-success small fw-bold">+18%</span>
-            </div>
-            <div class="stat-value">342</div>
-            <div class="stat-label">Total Item Scan</div>
         </div>
     </div>
 </div>
 
-<div class="card border-0 shadow-sm">
-    <div class="card-body">
-        <h5 class="card-title fw-bold mb-3">Aktivitas Terbaru</h5>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const ctx = document.getElementById('deliveryChart').getContext('2d');
         
-        <div class="list-group list-group-flush">
-            <div class="list-group-item d-flex justify-content-between align-items-center py-3 border-bottom">
-                <div class="d-flex align-items-center gap-3">
-                    <div class="bg-light p-2 rounded">
-                        <i class="fa-solid fa-box-open text-muted"></i>
-                    </div>
-                    <div>
-                        <div class="fw-bold">SO.2017.02.00001</div>
-                        <div class="text-muted small">Abadi Phone Center</div>
-                    </div>
-                </div>
-                <div class="text-end">
-                    <span class="badge bg-success bg-opacity-10 text-success mb-1">Selesai</span>
-                    <div class="text-muted small">10 Feb 2017</div>
-                </div>
-            </div>
-            
-             <div class="list-group-item d-flex justify-content-between align-items-center py-3 border-bottom">
-                <div class="d-flex align-items-center gap-3">
-                    <div class="bg-light p-2 rounded">
-                        <i class="fa-solid fa-box-open text-muted"></i>
-                    </div>
-                    <div>
-                        <div class="fw-bold">SO.2017.02.00002</div>
-                        <div class="text-muted small">Pelanggan Umum - Jakarta</div>
-                    </div>
-                </div>
-                <div class="text-end">
-                    <span class="badge bg-success bg-opacity-10 text-success mb-1">Selesai</span>
-                    <div class="text-muted small">10 Feb 2017</div>
-                </div>
-            </div>
+        // Data dari PHP
+        const labels = {!! json_encode($chartLabels) !!};
+        const dataValues = {!! json_encode($chartData) !!};
 
-        </div>
-    </div>
-</div>
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Jumlah Pengiriman (DO)',
+                    data: dataValues,
+                    backgroundColor: '#2563eb', // Blue Primary
+                    borderRadius: 6,
+                    barThickness: 30
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: { grid: { display: false } },
+                    y: { 
+                        beginAtZero: true,
+                        ticks: { stepSize: 1 }
+                    }
+                }
+            }
+        });
+    });
+</script>
 @endsection
