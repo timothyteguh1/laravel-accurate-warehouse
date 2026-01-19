@@ -85,7 +85,7 @@
             <div class="card card-custom border-0 shadow-sm h-100">
                 <div class="card-body d-flex flex-column">
                     <h5 class="fw-bold mb-3">Status Integrasi</h5>
-                    <div class="flex-grow-1">
+                    <div class="grow">
                         <div class="d-flex justify-content-between mb-3 border-bottom pb-2">
                             <span class="text-muted">API Accurate</span>
                             <span class="badge bg-success rounded-pill">Terkoneksi</span>
