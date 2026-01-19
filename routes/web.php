@@ -3,7 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AccurateTestController;
 use App\Http\Controllers\WarehouseController;
-use App\Http\Controllers\SalesOrderController; // <--- Tambahkan ini
+use App\Http\Controllers\SalesOrderController;
 
 /*
 |--------------------------------------------------------------------------
@@ -16,7 +16,7 @@ Route::get('/', function () {
     return redirect('/dashboard');
 });
 
-// === AUTH ACCURATE (Controller Lama) ===
+// === AUTH ACCURATE ===
 Route::get('/accurate/login', [AccurateTestController::class, 'login'])->name('accurate.login');
 Route::get('/accurate/callback', [AccurateTestController::class, 'callback'])->name('accurate.callback');
 Route::get('/accurate/open-db', [AccurateTestController::class, 'openDatabase']);
@@ -24,20 +24,27 @@ Route::get('/accurate/open-db', [AccurateTestController::class, 'openDatabase'])
 // === GUDANG & SO ===
 Route::middleware(['web'])->group(function () {
     
-    // --- Dashboard & Warehouse (Existing) ---
+    // --- Dashboard ---
     Route::get('/dashboard', [WarehouseController::class, 'dashboard']);
-    Route::get('/scan-so', [WarehouseController::class, 'scanSO']);
 
-    // Proses Scan
-    Route::post('/scan-process/submit', [WarehouseController::class, 'submitDeliveryOrder']);
+    // --- ALUR LIST -> DETAIL -> SCAN ---
+    // 1. List SO (Halaman Antrian)
+    Route::get('/scan-so', [WarehouseController::class, 'scanSOListPage']); 
+
+    // 2. Detail SO (Halaman Scan Barang)
+    Route::get('/scan-process/{id}', [WarehouseController::class, 'scanSODetailPage']);
+
+    // 3. Submit DO + Close SO (Action)
+    Route::post('/scan-process/submit', [WarehouseController::class, 'submitDOWithLocalLookup']);
+
+    // --- Print DO ---
     Route::get('/print-do/{id}', [WarehouseController::class, 'printDeliveryOrder']);
-    Route::get('/scan-process/{id}', [WarehouseController::class, 'scanProcess']);
     
-    // Setup Dummy Data
-    Route::get('/setup-data', [WarehouseController::class, 'generateDummyData']);
-    Route::get('/setup-stock', [WarehouseController::class, 'fillDummyStock']);
-
-    // --- SALES ORDER MANUAL (BARU) ---
+    // --- SALES ORDER MANUAL (Optional) ---
     Route::get('/sales-order/create', [SalesOrderController::class, 'create']);
     Route::post('/sales-order/store', [SalesOrderController::class, 'store']);
+    
+    // Setup Dummy (Optional)
+    Route::get('/setup-data', [WarehouseController::class, 'generateDummyData']);
+    Route::get('/setup-stock', [WarehouseController::class, 'fillDummyStock']);
 });
