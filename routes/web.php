@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AccurateTestController;
 use App\Http\Controllers\WarehouseController;
+use App\Http\Controllers\SalesOrderController; // <--- Tambahkan ini
 
 /*
 |--------------------------------------------------------------------------
@@ -20,10 +21,10 @@ Route::get('/accurate/login', [AccurateTestController::class, 'login'])->name('a
 Route::get('/accurate/callback', [AccurateTestController::class, 'callback'])->name('accurate.callback');
 Route::get('/accurate/open-db', [AccurateTestController::class, 'openDatabase']);
 
-// === GUDANG / WAREHOUSE (Controller Baru) ===
+// === GUDANG & SO ===
 Route::middleware(['web'])->group(function () {
     
-    // Dashboard & List
+    // --- Dashboard & Warehouse (Existing) ---
     Route::get('/dashboard', [WarehouseController::class, 'dashboard']);
     Route::get('/scan-so', [WarehouseController::class, 'scanSO']);
 
@@ -32,7 +33,11 @@ Route::middleware(['web'])->group(function () {
     Route::get('/print-do/{id}', [WarehouseController::class, 'printDeliveryOrder']);
     Route::get('/scan-process/{id}', [WarehouseController::class, 'scanProcess']);
     
-    // Setup
+    // Setup Dummy Data
     Route::get('/setup-data', [WarehouseController::class, 'generateDummyData']);
     Route::get('/setup-stock', [WarehouseController::class, 'fillDummyStock']);
+
+    // --- SALES ORDER MANUAL (BARU) ---
+    Route::get('/sales-order/create', [SalesOrderController::class, 'create']);
+    Route::post('/sales-order/store', [SalesOrderController::class, 'store']);
 });
