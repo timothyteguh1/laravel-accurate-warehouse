@@ -136,6 +136,9 @@ public function dashboard()
     }
 
     // 2. HALAMAN DETAIL SO
+    // app/Http/Controllers/WarehouseController.php
+
+// 2. HALAMAN DETAIL SO
     public function scanSODetailPage($id)
     {
         $auth = $this->getAuthData();
@@ -153,7 +156,7 @@ public function dashboard()
             $so = $response->json()['d'] ?? null;
             if (!$so) return redirect('/scan-so')->with('error', 'Data SO tidak ditemukan.');
 
-            // Cek Stok Real (Bypass 100 jika error/0 agar bisa ditest)
+            // Cek Stok Real (FIX: JANGAN BYPASS LAGI)
             foreach ($so['detailItem'] as &$item) {
                 $itemNo = $item['item']['no'];
                 try {
@@ -161,18 +164,24 @@ public function dashboard()
                         'Authorization' => 'Bearer ' . $auth['token'],
                         'X-Session-ID' => $auth['session']
                     ])->get($auth['host'] . '/accurate/api/item/list.do', [
-                        'fields' => 'quantity',       
+                        'fields' => 'quantity,upcNo', // Ambil stok & barcode       
                         'filter.no.op' => 'EQUAL',    
                         'filter.no.val' => $itemNo
                     ]);
                     $dataBarang = $stokRes->json()['d'][0] ?? [];
                     $stokAsli = $dataBarang['quantity'] ?? 0;
                     
-                    if ($stokAsli <= 0) $item['stok_gudang'] = 100; // BYPASS STOK
-                    else $item['stok_gudang'] = $stokAsli;
+                    // 1. Simpan Barcode (Logic sebelumnya)
+                    $item['barcode_asli'] = $dataBarang['upcNo'] ?? $itemNo;
+
+                    // 2. FIX: Gunakan stok asli, jangan diubah jadi 100
+                    // Hapus logika "if ($stokAsli <= 0) ..."
+                    $item['stok_gudang'] = $stokAsli;
 
                 } catch (\Exception $e) {
-                    $item['stok_gudang'] = 100; // BYPASS ERROR
+                    // Jika error koneksi/API, set 0 (aman), jangan 100
+                    $item['stok_gudang'] = 0; 
+                    $item['barcode_asli'] = $itemNo;
                 }
             }
 
@@ -184,126 +193,253 @@ public function dashboard()
     }
 
     // 3. PROSES SUBMIT DO + MANUAL CLOSE
-    public function submitDOWithLocalLookup(Request $request)
-    {
-        $soNumber = $request->so_number;
-        $itemsScanned = $request->items; 
-        $auth = $this->getAuthData();
+    // File: app/Http/Controllers/WarehouseController.php
 
-        if (!$auth) return response()->json(['success' => false, 'message' => 'Sesi habis, login ulang.']);
+public function submitDOWithLocalLookup(Request $request)
+{
+    $soNumber = $request->so_number;
+    $itemsScanned = $request->items; // Format: ['ITEM-001' => 5, 'ITEM-002' => 0]
+    $auth = $this->getAuthData();
 
-        // --- A. TARIK DATA SO ASLI ---
-        try {
-            $findSo = Http::withHeaders(['Authorization' => 'Bearer ' . $auth['token'], 'X-Session-ID' => $auth['session']])
-                ->get($auth['host'] . '/accurate/api/sales-order/list.do', ['filter.number.op' => 'EQUAL', 'filter.number.val' => $soNumber]);
-            
-            $soId = $findSo->json()['d'][0]['id'] ?? null;
-            if (!$soId) return response()->json(['success' => false, 'message' => 'SO ID tidak ditemukan.']);
+    if (!$auth) return response()->json(['success' => false, 'message' => 'Sesi habis, login ulang.']);
 
-            $soDetailRes = Http::withHeaders(['Authorization' => 'Bearer ' . $auth['token'], 'X-Session-ID' => $auth['session']])
-                ->get($auth['host'] . '/accurate/api/sales-order/detail.do', ['id' => $soId]);
-            
-            $soData = $soDetailRes->json()['d'] ?? null;
-            if (!$soData) return response()->json(['success' => false, 'message' => 'Gagal tarik detail SO.']);
-
-        } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => 'Koneksi Error: ' . $e->getMessage()]);
-        }
-
-        // --- B. SUSUN PAYLOAD DO ---
-        $detailItemPayload = [];
+    // --- A. TARIK DATA SO ASLI ---
+    try {
+        $findSo = Http::withHeaders(['Authorization' => 'Bearer ' . $auth['token'], 'X-Session-ID' => $auth['session']])
+            ->get($auth['host'] . '/accurate/api/sales-order/list.do', ['filter.number.op' => 'EQUAL', 'filter.number.val' => $soNumber]);
         
-        foreach ($soData['detailItem'] as $accLine) {
-            $accSku = $accLine['item']['no'];
-            
-            if (isset($itemsScanned[$accSku])) {
-                $qtyScan = (int) $itemsScanned[$accSku];
+        $soId = $findSo->json()['d'][0]['id'] ?? null;
+        if (!$soId) return response()->json(['success' => false, 'message' => 'SO ID tidak ditemukan.']);
 
-                if ($qtyScan > 0) {
-                    $linePayload = [
-                        'itemNo' => $accSku,
-                        'salesOrderDetailId' => $accLine['id'],
-                        'quantity' => $qtyScan,
-                        'itemUnit' => $accLine['itemUnit'] ?? null,
-                    ];
-                    
-                    if (isset($accLine['warehouse'])) $linePayload['warehouse'] = ['id' => $accLine['warehouse']['id']];
-                    if (isset($accLine['department'])) $linePayload['department'] = ['id' => $accLine['department']['id']];
-                    if (isset($accLine['project'])) $linePayload['project'] = ['id' => $accLine['project']['id']];
+        $soDetailRes = Http::withHeaders(['Authorization' => 'Bearer ' . $auth['token'], 'X-Session-ID' => $auth['session']])
+            ->get($auth['host'] . '/accurate/api/sales-order/detail.do', ['id' => $soId]);
+        
+        $soData = $soDetailRes->json()['d'] ?? null;
+        if (!$soData) return response()->json(['success' => false, 'message' => 'Gagal tarik detail SO.']);
 
-                    $detailItemPayload[] = $linePayload;
-                    $itemsScanned[$accSku] -= $qtyScan;
-                }
-            }
+    } catch (\Exception $e) {
+        return response()->json(['success' => false, 'message' => 'Koneksi Error: ' . $e->getMessage()]);
+    }
+
+    // --- B. CEK APAKAH PERLU SPLIT ORDER (BACKORDER)? ---
+    $itemsReady = [];     // Untuk SO Baru #1 (Yang akan di-DO)
+    $itemsBackorder = []; // Untuk SO Baru #2 (Sisa)
+    $needsSplit = false;
+
+    foreach ($soData['detailItem'] as $line) {
+        $sku = $line['item']['no'];
+        // Ambil barcode jika ada (untuk matching), jika tidak pakai SKU
+        $barcode = $line['item']['upcNo'] ?? $sku; 
+        
+        $qtyOrder = (float) $line['quantity'];
+        
+        // Cek qty dari input scanner (mapping barcode/sku)
+        // Prioritas cek barcode, kalau gak ada cek SKU
+        $qtyScan = 0;
+        if (isset($itemsScanned[$barcode])) {
+            $qtyScan = (float) $itemsScanned[$barcode];
+        } elseif (isset($itemsScanned[$sku])) {
+            $qtyScan = (float) $itemsScanned[$sku];
         }
 
-        if (empty($detailItemPayload)) {
-            return response()->json(['success' => false, 'message' => 'Tidak ada item yang cocok.']);
+        // 1. Masukkan ke keranjang "Ready" (yang discan)
+        if ($qtyScan > 0) {
+            $lineReady = $line; // Copy semua properti (harga, diskon, dll)
+            $lineReady['quantity'] = $qtyScan; 
+            // Hapus ID lama agar dianggap item baru saat create SO
+            unset($lineReady['id']); 
+            $itemsReady[] = $lineReady;
         }
 
-        // --- C. KIRIM DELIVERY ORDER (DO) ---
-        $payloadDO = [
-            'transDate' => date('d/m/Y'),
-            'description' => 'DO Scan App: Mengirim ' . $soNumber,
-            'customerNo' => $soData['customer']['customerNo'],
-            'detailItem' => $detailItemPayload
-        ];
-        if (isset($soData['branch'])) $payloadDO['branch'] = ['id' => $soData['branch']['id']];
-
-        try {
-            $res = Http::withHeaders([
-                'Authorization' => 'Bearer ' . $auth['token'], 
-                'X-Session-ID' => $auth['session']
-            ])->post($auth['host'] . '/accurate/api/delivery-order/save.do', $payloadDO);
+        // 2. Masukkan ke keranjang "Backorder" (Sisanya)
+        if ($qtyScan < $qtyOrder) {
+            $needsSplit = true;
+            $sisa = $qtyOrder - $qtyScan;
             
-            $result = $res->json();
-
-            // === JIKA DO SUKSES ===
-            if (isset($result['r'])) {
-                
-                // --- D. FORCE CLOSE ---
-                try {
-                    $closeUrl = $auth['host'] . '/accurate/api/sales-order/manual-close-order.do';
-                    
-                    $closePayload = [
-                        'number' => $soNumber,
-                        'orderClosed' => true
-                    ];
-
-                    $closeRes = Http::withHeaders([
-                        'Authorization' => 'Bearer ' . $auth['token'], 
-                        'X-Session-ID' => $auth['session']
-                    ])->post($closeUrl, $closePayload);
-                    
-                    $closeResult = $closeRes->json();
-                    if (!isset($closeResult['r'])) {
-                         Log::warning('Manual Close SO Warning: ' . json_encode($closeResult));
-                    }
-
-                } catch (\Exception $ex) {
-                    // Ignore error close
-                }
-
-                // Update DB Lokal (Tetap dibiarkan sesuai request)
-                DB::table('local_so_details')
-                    ->where('so_number', $soNumber)
-                    ->update(['status' => 'CLOSED', 'updated_at' => now()]);
-
-                return response()->json([
-                    'success' => true,
-                    'do_number' => $result['r']['number'],
-                    'do_id' => $result['r']['id']
-                ]);
-
-            } else {
-                $errMsg = $result['d'] ?? 'Gagal Unknown';
-                if(is_array($errMsg)) $errMsg = json_encode($errMsg);
-                return response()->json(['success' => false, 'message' => 'Accurate Error (DO): ' . $errMsg]);
+            if ($sisa > 0) {
+                $lineBack = $line;
+                $lineBack['quantity'] = $sisa;
+                unset($lineBack['id']);
+                $itemsBackorder[] = $lineBack;
             }
-        } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => 'Server Error: ' . $e->getMessage()]);
         }
     }
+
+    if (empty($itemsReady)) {
+        return response()->json(['success' => false, 'message' => 'Tidak ada barang yang discan!']);
+    }
+
+    // --- C. EKSEKUSI SPLIT (JIKA ADA BACKORDER) ---
+    if ($needsSplit) {
+        try {
+            // 1. BUAT SO BARU #1 (READY)
+            $payloadReady = [
+                'transDate' => $soData['transDate'],
+                'customerNo' => $soData['customer']['customerNo'],
+                'description' => 'Split (Ready) dari ' . $soNumber,
+                'detailItem' => $this->formatDetailForSave($itemsReady)
+            ];
+            // Copy field header penting lainnya
+            if(isset($soData['branch'])) $payloadReady['branch'] = ['id' => $soData['branch']['id']];
+            if(isset($soData['poNumber'])) $payloadReady['poNumber'] = $soData['poNumber'];
+
+            $resReady = Http::withHeaders(['Authorization' => 'Bearer ' . $auth['token'], 'X-Session-ID' => $auth['session']])
+                ->post($auth['host'] . '/accurate/api/sales-order/save.do', $payloadReady);
+            
+            if (!isset($resReady->json()['r']['id'])) {
+                return response()->json(['success' => false, 'message' => 'Gagal buat SO Ready: ' . json_encode($resReady->json())]);
+            }
+            $newSoReadyId = $resReady->json()['r']['id'];
+            $newSoReadyNumber = $resReady->json()['r']['number'];
+
+            // 2. BUAT SO BARU #2 (BACKORDER) - Jika ada isinya
+            if (!empty($itemsBackorder)) {
+                $payloadBack = $payloadReady;
+                $payloadBack['description'] = 'Split (Backorder) dari ' . $soNumber;
+                $payloadBack['detailItem'] = $this->formatDetailForSave($itemsBackorder);
+
+                Http::withHeaders(['Authorization' => 'Bearer ' . $auth['token'], 'X-Session-ID' => $auth['session']])
+                    ->post($auth['host'] . '/accurate/api/sales-order/save.do', $payloadBack);
+            }
+
+            // 3. HAPUS SO LAMA (ORIGINAL)
+            Http::withHeaders(['Authorization' => 'Bearer ' . $auth['token'], 'X-Session-ID' => $auth['session']])
+                ->post($auth['host'] . '/accurate/api/sales-order/delete.do', ['id' => $soId]);
+
+            // 4. UPDATE DATA REFERENSI UNTUK PROSES DO
+            // Kita harus menukar soData dengan data dari SO Baru #1 agar DO mengacu ke SO baru
+            $soNumber = $newSoReadyNumber;
+            
+            // Fetch ulang detail SO Baru #1 untuk mendapatkan salesOrderDetailId yang baru
+            $newSoDetailRes = Http::withHeaders(['Authorization' => 'Bearer ' . $auth['token'], 'X-Session-ID' => $auth['session']])
+                ->get($auth['host'] . '/accurate/api/sales-order/detail.do', ['id' => $newSoReadyId]);
+            
+            $soData = $newSoDetailRes->json()['d']; // Ganti soData lama dengan yang baru
+            
+            // Reset itemsScanned agar cocok dengan logic DO di bawah (karena SO baru qty-nya sudah pas dengan scan)
+            // Kita set ulang itemsScanned supaya logic looping DO di bawah mengambil SEMUA item di SO baru ini
+            $itemsScanned = [];
+            foreach($soData['detailItem'] as $ln) {
+                $itemsScanned[$ln['item']['no']] = $ln['quantity'];
+            }
+
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Gagal Proses Split: ' . $e->getMessage()]);
+        }
+    }
+
+    // --- D. SUSUN PAYLOAD DELIVERY ORDER (Sama seperti sebelumnya) ---
+    // Logic ini sekarang aman karena $soData sudah menunjuk ke SO yang benar (Entah SO asli jika full, atau SO Ready jika split)
+    $detailItemPayload = [];
+    
+    foreach ($soData['detailItem'] as $accLine) {
+        $accSku = $accLine['item']['no'];
+        
+        // Logic match quantity
+        $qtyToShip = 0;
+        
+        // Jika Split, kita ambil semua qty di SO Ready (karena sudah dipotong pas)
+        // Jika Normal, kita ambil berdasarkan input scan
+        if ($needsSplit) {
+            $qtyToShip = $accLine['quantity'];
+        } else {
+            // Cek mapping barcode/sku
+            $barcode = $accLine['item']['upcNo'] ?? $accSku;
+            if (isset($itemsScanned[$barcode])) {
+                $qtyToShip = (int) $itemsScanned[$barcode];
+            } elseif (isset($itemsScanned[$accSku])) {
+                $qtyToShip = (int) $itemsScanned[$accSku];
+            }
+        }
+
+        if ($qtyToShip > 0) {
+            $linePayload = [
+                'itemNo' => $accSku,
+                'salesOrderDetailId' => $accLine['id'], // ID Line penting untuk link DO ke SO
+                'quantity' => $qtyToShip,
+                'itemUnit' => $accLine['itemUnit'] ?? null,
+            ];
+            
+            if (isset($accLine['warehouse'])) $linePayload['warehouse'] = ['id' => $accLine['warehouse']['id']];
+            if (isset($accLine['department'])) $linePayload['department'] = ['id' => $accLine['department']['id']];
+            if (isset($accLine['project'])) $linePayload['project'] = ['id' => $accLine['project']['id']];
+
+            $detailItemPayload[] = $linePayload;
+        }
+    }
+
+    // --- E. KIRIM DELIVERY ORDER ---
+    $payloadDO = [
+        'transDate' => date('d/m/Y'),
+        'description' => 'DO Scan App: Mengirim ' . $soNumber,
+        'customerNo' => $soData['customer']['customerNo'],
+        'detailItem' => $detailItemPayload
+    ];
+    if (isset($soData['branch'])) $payloadDO['branch'] = ['id' => $soData['branch']['id']];
+
+    try {
+        $res = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $auth['token'], 
+            'X-Session-ID' => $auth['session']
+        ])->post($auth['host'] . '/accurate/api/delivery-order/save.do', $payloadDO);
+        
+        $result = $res->json();
+
+        // === JIKA DO SUKSES ===
+        if (isset($result['r'])) {
+            
+            // --- F. FORCE CLOSE SO (YANG SUDAH DI-DO) ---
+            try {
+                $closeUrl = $auth['host'] . '/accurate/api/sales-order/manual-close-order.do';
+                Http::withHeaders([
+                    'Authorization' => 'Bearer ' . $auth['token'], 
+                    'X-Session-ID' => $auth['session']
+                ])->post($closeUrl, ['number' => $soNumber, 'orderClosed' => true]);
+
+            } catch (\Exception $ex) { /* Ignore */ }
+
+            // Update DB Lokal
+            DB::table('local_so_details')
+                ->where('so_number', $request->so_number) // Gunakan no asli request utk log
+                ->update(['status' => 'CLOSED', 'updated_at' => now()]);
+
+            return response()->json([
+                'success' => true,
+                'do_number' => $result['r']['number'],
+                'do_id' => $result['r']['id'],
+                'message' => $needsSplit ? 'Order dipecah & Backorder dibuat.' : 'Order terkirim full.'
+            ]);
+
+        } else {
+            $errMsg = $result['d'] ?? 'Gagal Unknown';
+            if(is_array($errMsg)) $errMsg = json_encode($errMsg);
+            return response()->json(['success' => false, 'message' => 'Accurate Error (DO): ' . $errMsg]);
+        }
+    } catch (\Exception $e) {
+        return response()->json(['success' => false, 'message' => 'Server Error: ' . $e->getMessage()]);
+    }
+}
+
+// Helper untuk memformat item saat save SO baru
+private function formatDetailForSave($items) {
+    $formatted = [];
+    foreach ($items as $item) {
+        $row = [
+            'itemNo' => $item['item']['no'],
+            'unitPrice' => $item['unitPrice'],
+            'quantity' => $item['quantity'],
+            'itemUnit' => $item['itemUnit'] ?? null,
+        ];
+        // Copy field lain jika ada
+        if(isset($item['itemDiscPercent'])) $row['itemDiscPercent'] = $item['itemDiscPercent'];
+        if(isset($item['warehouse'])) $row['warehouse'] = ['id' => $item['warehouse']['id']];
+        if(isset($item['department'])) $row['department'] = ['id' => $item['department']['id']];
+        if(isset($item['project'])) $row['project'] = ['id' => $item['project']['id']];
+        
+        $formatted[] = $row;
+    }
+    return $formatted;
+}
 
     // --- PRINT DO ---
     public function printDeliveryOrder($id)

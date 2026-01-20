@@ -101,7 +101,7 @@
             </a>
 
             <a href="{{ url('/inventory') }}" class="nav-link {{ Request::is('inventory*') ? 'active' : '' }}">
-                <i class="fa-solid fa-boxes-stacked"></i> Inventori
+                <i class="fa-solid fa-boxes-stacked"></i> Inventory
             </a>
         </nav>
     </div>

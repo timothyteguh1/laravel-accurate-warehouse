@@ -25,7 +25,7 @@
             <div class="input-group input-group-lg">
                 <span class="input-group-text bg-white border-end-0"><i class="fa-solid fa-qrcode"></i></span>
                 <input type="text" class="form-control fw-bold border-start-0 fs-4" id="barcodeInput" 
-                       placeholder="Scan Barang..." autofocus autocomplete="off" 
+                       placeholder="Scan Barcode..." autofocus autocomplete="off" 
                        onblur="this.focus()">
             </div>
             
@@ -62,8 +62,10 @@
                 </thead>
                 <tbody>
                     @foreach($so['detailItem'] as $item)
+                    {{-- UPDATE: Tambahkan data-barcode (UPC No) untuk identifikasi scanner --}}
                     <tr id="row-{{ $item['item']['no'] }}" class="barang-row"
                         data-code="{{ $item['item']['no'] }}" 
+                        data-barcode="{{ $item['barcode_asli'] ?? $item['item']['no'] }}" 
                         data-name="{{ $item['item']['name'] }}"
                         data-target="{{ $item['quantity'] }}"
                         data-stock="{{ $item['stok_gudang'] ?? 0 }}"> 
@@ -71,8 +73,13 @@
                         <td class="ps-4">
                             <div class="fw-bold text-dark">{{ $item['item']['name'] }}</div>
                             <div class="badge bg-light text-dark border mt-1">
-                                {{ $item['item']['no'] }}
+                                SKU: {{ $item['item']['no'] }}
                             </div>
+                            @if(isset($item['barcode_asli']) && $item['barcode_asli'] != $item['item']['no'])
+                            <div class="badge bg-info text-white border mt-1">
+                                BC: {{ $item['barcode_asli'] }}
+                            </div>
+                            @endif
                         </td>
                         
                         <td class="text-center fw-bold fs-5 text-secondary">
@@ -102,13 +109,11 @@
 <script>
     let itemCounts = {}; 
     const soNumber = "{{ $so['number'] }}";
-    // Data customerNo tidak lagi diambil dari sini untuk DO, tapi ditangani Controller demi keamanan
     
     @foreach($so['detailItem'] as $item)
         itemCounts['{{ $item['item']['no'] }}'] = 0;
     @endforeach
 
-    // Audio
     const audioSuccess = new Audio('https://actions.google.com/sounds/v1/cartoon/pop.ogg');
     const audioError   = new Audio('https://actions.google.com/sounds/v1/alarms/bugle_tune.ogg');
     const audioLimit   = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
@@ -121,36 +126,38 @@
     inputEl.addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
             e.preventDefault();
-            let code = this.value.trim();
+            let scannedValue = this.value.trim();
             this.value = '';
-            if (code === "") return;
-            prosesScan(code);
+            if (scannedValue === "") return;
+            prosesScan(scannedValue);
         }
     });
 
-    function prosesScan(code) {
-        let row = document.getElementById(`row-${code}`);
+    function prosesScan(scannedValue) {
+        // UPDATE: Cari baris berdasarkan data-barcode (UPC No)
+        let row = document.querySelector(`.barang-row[data-barcode="${scannedValue}"]`);
 
         if (!row) {
-            showError('SALAH BARANG!', `Kode <b>${code}</b> tidak ada di SO ini.`);
+            showError('SALAH BARANG!', `Barcode <b>${scannedValue}</b> tidak ditemukan dalam daftar pesanan ini.`);
             return;
         }
 
+        // Ambil Item No (SKU) asli untuk pemrosesan data
+        let code = row.getAttribute('data-code');
         let name = row.getAttribute('data-name');
         let target = parseInt(row.getAttribute('data-target')) || 0;
         let stockReal = parseInt(row.getAttribute('data-stock')); 
         
         if (isNaN(stockReal)) stockReal = 0;
-
         let current = itemCounts[code];
 
         if ((current + 1) > stockReal) {
-            showError('STOK HABIS!', `Gudang cuma punya <b>${stockReal}</b> pcs.<br>Tidak bisa ambil barang lagi.`);
+            showError('STOK HABIS!', `Stok di Accurate hanya <b>${stockReal}</b> pcs.<br>Tidak dapat menambah item.`);
             return;
         }
 
         if (current >= target) {
-            showWarning('SUDAH LENGKAP', `Barang <b>${name}</b> sudah pas ${target} pcs sesuai order.`);
+            showWarning('SUDAH LENGKAP', `Item <b>${name}</b> sudah terpenuhi sesuai target (${target} pcs).`);
             return;
         }
 
@@ -160,7 +167,7 @@
         audioSuccess.play();
         statusEl.className = "p-2 mb-2 rounded text-center fw-bold bg-success text-white";
         statusEl.innerHTML = `SUKSES: ${name}`;
-        tampilkanPesan('success', `✅ <b>${name}</b> masuk (+1)`);
+        tampilkanPesan('success', `✅ <b>${name}</b> berhasil discan (+1)`);
     }
 
     function updateUI(code, target, stockReal) {
@@ -217,12 +224,11 @@
     }
 
     function kirimKeAccurate() {
-        // [FIX] Matikan focus pada input agar tidak konflik dengan SweetAlert (Aria Hidden Warning)
         if (inputEl) inputEl.blur();
 
         Swal.fire({
             title: 'Memproses DO...',
-            html: 'Mengirim data ke Accurate...<br><small>Mohon tunggu maksimal 60 detik</small>',
+            html: 'Menghubungkan ke API Accurate...<br><small>Mohon tunggu sebentar</small>',
             allowOutsideClick: false,
             didOpen: () => { Swal.showLoading() }
         });
@@ -237,7 +243,6 @@
             body: JSON.stringify({
                 so_id: "{{ $so['id'] }}",
                 so_number: soNumber,
-                // Customer No dihapus dari sini, biarkan Controller yang ambil dari SO asli
                 items: itemCounts
             })
         })
@@ -256,14 +261,14 @@
                     html: `
                         <div class="text-start bg-light p-3 rounded small">
                             <strong>No DO:</strong> ${data.do_number}<br>
-                            <strong>Status:</strong> Stok Berhasil Terpotong<br>
+                            <strong>Status:</strong> Terkirim ke Accurate<br>
                             <br>
-                            Silakan download surat jalan sekarang.
+                            Surat jalan siap dicetak.
                         </div>
                     `,
                     showCancelButton: true,
-                    confirmButtonText: '📥 Download PDF Surat Jalan',
-                    cancelButtonText: 'Kembali ke List SO',
+                    confirmButtonText: '📥 Cetak Surat Jalan',
+                    cancelButtonText: 'Kembali ke List',
                     confirmButtonColor: '#0d6efd',
                     cancelButtonColor: '#6c757d',
                     allowOutsideClick: false
@@ -278,26 +283,20 @@
                 });
             } else {
                 Swal.fire('Gagal!', data.message, 'error');
-                // Kembalikan fokus jika gagal
                 if(inputEl) inputEl.focus();
             }
         })
         .catch(err => {
-            // [FIX] Tampilkan error di console log sesuai permintaan
-            console.error("DEBUG ERROR LARAVEL:", err);
-            
+            console.error("DEBUG ERROR:", err);
             Swal.fire({
                 icon: 'error',
                 title: 'Gagal Kirim',
-                text: err.message,
-                footer: 'Cek Console (F12) untuk detail error.'
+                text: err.message
             });
-            // Kembalikan fokus
             if(inputEl) inputEl.focus();
         });
     }
 
-    // Auto Focus saat halaman dimuat
     window.onload = function() { 
         if(inputEl) inputEl.focus(); 
     }
