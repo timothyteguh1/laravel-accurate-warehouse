@@ -4,6 +4,21 @@
 
 @section('content')
 <div class="container-fluid">
+    
+    {{-- ALERT KONEKSI ACCURATE (Hanya Muncul Jika Belum Connect) --}}
+    @if(isset($isConnected) && !$isConnected)
+    <div class="alert alert-warning d-flex align-items-center justify-content-between mb-4 shadow-sm" role="alert">
+        <div>
+            <i class="fa-solid fa-triangle-exclamation me-2"></i>
+            <strong>Sistem belum terhubung ke Accurate Pusat!</strong>
+            <span class="small d-block">Data tidak akan muncul sampai Admin menghubungkan akun.</span>
+        </div>
+        <a href="{{ route('accurate.auth') }}" class="btn btn-warning fw-bold text-dark">
+            <i class="fa-solid fa-link me-2"></i> Hubungkan Sekarang
+        </a>
+    </div>
+    @endif
+
     <div class="row g-4 mb-4">
         <div class="col-md-4">
             <div class="card card-custom border-0 shadow-sm h-100">
@@ -88,7 +103,11 @@
                     <div class="grow">
                         <div class="d-flex justify-content-between mb-3 border-bottom pb-2">
                             <span class="text-muted">API Accurate</span>
-                            <span class="badge bg-success rounded-pill">Terkoneksi</span>
+                            @if(isset($isConnected) && $isConnected)
+                                <span class="badge bg-success rounded-pill">Terkoneksi</span>
+                            @else
+                                <span class="badge bg-danger rounded-pill">Terputus</span>
+                            @endif
                         </div>
                         <div class="d-flex justify-content-between mb-3 border-bottom pb-2">
                             <span class="text-muted">Host</span>

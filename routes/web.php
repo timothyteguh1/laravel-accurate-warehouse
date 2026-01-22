@@ -1,56 +1,46 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AuthController;
 use App\Http\Controllers\AccurateTestController;
 use App\Http\Controllers\WarehouseController;
 use App\Http\Controllers\SalesOrderController;
 use App\Http\Controllers\InventoryController;
-/*
-|--------------------------------------------------------------------------
-| Web Routes
-|--------------------------------------------------------------------------
-*/
 
-// Redirect root
-Route::get('/', function () {
-    return redirect('/dashboard');
+// === 1. GUEST AREA (Halaman Login & Register Staff) ===
+Route::middleware('guest')->group(function () {
+    Route::get('/', [AuthController::class, 'showLogin'])->name('login');
+    Route::post('/login', [AuthController::class, 'login'])->name('login.post');
+    Route::get('/register', [AuthController::class, 'showRegister'])->name('register');
+    Route::post('/register', [AuthController::class, 'register'])->name('register.post');
 });
 
-// === AUTH ACCURATE ===
-Route::get('/accurate/login', [AccurateTestController::class, 'login'])->name('accurate.login');
-Route::get('/accurate/callback', [AccurateTestController::class, 'callback'])->name('accurate.callback');
-Route::get('/accurate/open-db', [AccurateTestController::class, 'openDatabase']);
-
-// === GUDANG & SO ===
-Route::middleware(['web'])->group(function () {
+// === 2. AUTH AREA (Area Kerja Staff) ===
+Route::middleware('auth')->group(function () {
     
-    // --- Dashboard ---
+    // Logout Staff
+    Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+
+    // === INTEGRASI ACCURATE (Admin Only) ===
+    Route::get('/accurate/auth', [AccurateTestController::class, 'login'])->name('accurate.auth');
+    Route::get('/accurate/callback', [AccurateTestController::class, 'callback'])->name('accurate.callback');
+    Route::get('/accurate/open-db', [AccurateTestController::class, 'openDatabase'])->name('accurate.open_db');
+
+    // === GUDANG DASHBOARD ===
     Route::get('/dashboard', [WarehouseController::class, 'dashboard']);
-
-    // --- ALUR LIST -> DETAIL -> SCAN ---
-    // 1. List SO (Halaman Antrian)
+    
+    // Fitur Operasional Gudang
     Route::get('/scan-so', [WarehouseController::class, 'scanSOListPage']); 
-
-    // 2. Detail SO (Halaman Scan Barang)
     Route::get('/scan-process/{id}', [WarehouseController::class, 'scanSODetailPage']);
-
-    // 3. Submit DO + Close SO (Action)
     Route::post('/scan-process/submit', [WarehouseController::class, 'submitDOWithLocalLookup']);
-
-    // --- Print DO ---
     Route::get('/print-do/{id}', [WarehouseController::class, 'printDeliveryOrder']);
     
-    // --- SALES ORDER MANUAL (Optional) ---
+    // Fitur Tambahan
     Route::get('/sales-order/create', [SalesOrderController::class, 'create']);
     Route::post('/sales-order/store', [SalesOrderController::class, 'store']);
-    
-    // Setup Dummy (Optional)
     Route::get('/setup-data', [WarehouseController::class, 'generateDummyData']);
     Route::get('/setup-stock', [WarehouseController::class, 'fillDummyStock']);
-
-    // Riwayat (SO Closed)
     Route::get('/history-do', [WarehouseController::class, 'historyDOPage']);
     Route::get('/find-do-print/{soNumber}', [WarehouseController::class, 'searchAndPrintDO']);
-    // --- INVENTORY LIST FROM ACCURATE ---
     Route::get('/inventory', [InventoryController::class, 'index']);
 });

@@ -23,6 +23,7 @@
             background: #FFFFFF;
             border-right: 1px solid #E5E7EB;
             padding-top: 24px;
+            z-index: 1000;
         }
 
         .brand {
@@ -77,6 +78,11 @@
             padding: 20px;
             box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
         }
+        
+        /* Dropdown User Profile Customization */
+        .user-dropdown-toggle {
+            cursor: pointer;
+        }
     </style>
 </head>
 
@@ -109,21 +115,41 @@
     <div class="main">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h1 class="header-title">@yield('header')</h1>
-            <div class="d-flex align-items-center gap-3">
-                <div class="text-end d-none d-md-block">
-                    <div class="fw-bold text-dark" style="font-size: 14px;">Admin Gudang</div>
-                    <div class="text-muted" style="font-size: 12px;">admin@warehouse.com</div>
+            
+            <div class="dropdown">
+                <div class="d-flex align-items-center gap-3 user-dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                    <div class="text-end d-none d-md-block">
+                        <div class="fw-bold text-dark" style="font-size: 14px;">{{ Auth::user()->name ?? 'Staff Gudang' }}</div>
+                        <div class="text-muted" style="font-size: 12px;">{{ Auth::user()->email ?? 'staff@warehouse.com' }}</div>
+                    </div>
+                    <div class="bg-dark text-white rounded-circle d-flex justify-content-center align-items-center"
+                        style="width: 40px; height: 40px;">
+                        <i class="fa-solid fa-user"></i>
+                    </div>
                 </div>
-                <div class="bg-dark text-white rounded-circle d-flex justify-content-center align-items-center"
-                    style="width: 40px; height: 40px;">
-                    <i class="fa-solid fa-user"></i>
-                </div>
+                
+                <ul class="dropdown-menu dropdown-menu-end border-0 shadow mt-2">
+                    <li><h6 class="dropdown-header">Akun</h6></li>
+                    <li><a class="dropdown-item" href="#"><i class="fa-solid fa-gear me-2"></i> Settings</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                        {{-- PERBAIKAN DI SINI: Ganti route ke 'logout' --}}
+                        <form action="{{ route('logout') }}" method="POST">
+                            @csrf
+                            <button type="submit" class="dropdown-item text-danger">
+                                <i class="fa-solid fa-right-from-bracket me-2"></i> Logout
+                            </button>
+                        </form>
+                    </li>
+                </ul>
             </div>
+            
         </div>
 
         @yield('content')
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 
 </html>

@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB; // WAJIB: Pakai DB Facade
 
 class AccurateTestController extends Controller
 {
@@ -19,31 +19,30 @@ class AccurateTestController extends Controller
         $this->redirectUri = env('ACCURATE_REDIRECT_URI');
     }
 
-    // --- TAHAP A: Login ---
+    // --- TAHAP A: Connect ke Accurate (Pintu Masuk Admin) ---
     public function login()
     {
         $query = http_build_query([
             'client_id' => $this->clientId,
             'response_type' => 'code',
             'redirect_uri' => $this->redirectUri,
-            // [PENTING] Scope ini menentukan izin apa saja yang kita minta
-            // delivery_order_view WAJIB ADA untuk fitur Print
             'scope' => 'sales_order_view sales_order_save delivery_order_save delivery_order_view item_view item_save customer_view item_category_view', 
         ]);
 
         return redirect('https://account.accurate.id/oauth/authorize?' . $query);
     }
 
-    // --- TAHAP B: Callback & Simpan Token ---
+    // --- TAHAP B: Callback & Simpan ke DATABASE ---
     public function callback(Request $request)
     {
         if ($request->has('error')) {
-            return response()->json(['error' => 'Login Gagal', 'msg' => $request->error]);
+            return redirect('/dashboard')->with('error', 'Login Accurate Gagal: ' . $request->error);
         }
         if (!$request->has('code')) {
-            return response()->json(['error' => 'Gagal: Tidak ada Authorization Code.']);
+            return redirect('/dashboard')->with('error', 'Gagal: Tidak ada Authorization Code.');
         }
 
+        // Tukar Code dengan Token
         $response = Http::withBasicAuth($this->clientId, $this->clientSecret)
             ->asForm()->post('https://account.accurate.id/oauth/token', [
                 'code' => $request->code,
@@ -52,68 +51,80 @@ class AccurateTestController extends Controller
             ]);
 
         if ($response->failed()) {
-            return response()->json(['error' => 'Gagal tukar token', 'details' => $response->json()]);
+            return redirect('/dashboard')->with('error', 'Gagal tukar token Accurate.');
         }
 
         $tokenData = $response->json();
-        // Simpan token baru ke file, menimpa yang lama
-        Storage::put('accurate_token.json', json_encode($tokenData));
 
-        return response()->json([
-            'status' => 'LOGIN BERHASIL & TOKEN DISIMPAN! ✅',
-            'pesan' => 'Token baru dengan izin Print sudah aktif. Silakan akses /accurate/open-db',
-            'data_token' => $tokenData
-        ]);
+        // [PENTING] Simpan Token ke Database (Selalu ID 1)
+        DB::table('accurate_tokens')->updateOrInsert(
+            ['id' => 1], // Kunci: Kita cuma pakai baris ID 1
+            [
+                'access_token' => $tokenData['access_token'],
+                'refresh_token' => $tokenData['refresh_token'],
+                'token_type' => $tokenData['token_type'] ?? 'Bearer',
+                'scope' => $tokenData['scope'] ?? '',
+                'updated_at' => now(),
+            ]
+        );
+
+        // Lanjut buka database
+        return $this->openDatabase();
     }
 
-    // --- TAHAP C: Buka Database ---
+    // --- TAHAP C: Buka Database & Simpan Session ---
     public function openDatabase()
     {
-        if (!Storage::exists('accurate_token.json')) {
-            return response()->json(['error' => 'Belum ada token. Login dulu.'], 401);
+        // Ambil token dari Database
+        $tokenRow = DB::table('accurate_tokens')->where('id', 1)->first();
+
+        if (!$tokenRow) {
+            return redirect('/dashboard')->with('warning', 'Sistem belum terhubung ke Accurate. Silakan klik tombol Connect.');
         }
 
-        $tokenData = json_decode(Storage::get('accurate_token.json'), true);
-        $accessToken = $tokenData['access_token'];
-        
-        // ID Database Anda
-        $databaseId = '2335871'; 
+        $accessToken = $tokenRow->access_token;
+        $databaseId = '2335871'; // ID Database Accurate Anda
 
         $response = Http::withToken($accessToken)->get('https://account.accurate.id/api/open-db.do', [
             'id' => $databaseId
         ]);
 
-        // Auto Refresh Token jika Expired
+        // Auto Refresh Token jika Expired (401)
         if ($response->status() === 401) {
-            $newTokenData = $this->refreshToken($tokenData['refresh_token']);
+            $newTokenData = $this->refreshToken($tokenRow->refresh_token);
             if (!$newTokenData) {
-                return response()->json(['error' => 'Token Expired & Gagal Refresh. Silakan Login Ulang.'], 401);
+                return redirect('/dashboard')->with('error', 'Koneksi Accurate Expired. Mohon Connect ulang.');
             }
             
-            // Simpan token hasil refresh
-            Storage::put('accurate_token.json', json_encode($newTokenData));
+            // Simpan token baru ke Database
+            DB::table('accurate_tokens')->where('id', 1)->update([
+                'access_token' => $newTokenData['access_token'],
+                'refresh_token' => $newTokenData['refresh_token'],
+                'updated_at' => now(),
+            ]);
+            
             $accessToken = $newTokenData['access_token'];
             
-            // Coba request ulang
+            // Retry Request
             $response = Http::withToken($accessToken)->get('https://account.accurate.id/api/open-db.do', [
                 'id' => $databaseId
             ]);
         }
 
         if ($response->failed()) {
-            return response()->json(['status' => 'Gagal Buka DB', 'error' => $response->json()]);
+            return redirect('/dashboard')->with('error', 'Gagal membuka Database Accurate.');
         }
 
         $data = $response->json();
         
-        // Simpan Session ID & Host
-        Storage::put('accurate_session.json', json_encode([
-            'session' => $data['session'], 
-            'host' => $data['host']
-        ]));
+        // [PENTING] Simpan Session & Host ke Database
+        DB::table('accurate_tokens')->where('id', 1)->update([
+            'session' => $data['session'],
+            'host' => $data['host'],
+            'updated_at' => now(),
+        ]);
 
-        // Redirect ke Dashboard setelah sukses buka DB
-        return redirect('/dashboard')->with('success', 'Database Terbuka!');
+        return redirect('/dashboard')->with('success', 'Koneksi Accurate Berhasil & Stabil!');
     }
 
     // --- HELPER: Refresh Token ---
@@ -125,80 +136,5 @@ class AccurateTestController extends Controller
                 'refresh_token' => $refreshToken,
             ]);
         return $response->successful() ? $response->json() : null;
-    }
-
-    // --- HELPER: Get Token (Internal Use) ---
-    private function getAccessToken()
-    {
-        if (Storage::exists('accurate_token.json')) {
-            return json_decode(Storage::get('accurate_token.json'), true)['access_token'];
-        }
-        return '';
-    }
-
-    // --- FITUR LAIN (Sales Order) ---
-    public function indexSalesOrder()
-    {
-        $listSO = $this->fetchSalesOrders();
-        return view('accurate-so', ['orders' => $listSO]);
-    }
-
-    private function fetchSalesOrders()
-    {
-        if (!Storage::exists('accurate_session.json')) {
-            return [];
-        }
-        
-        $sessionData = json_decode(Storage::get('accurate_session.json'), true);
-
-        $response = Http::withHeaders([
-            'Authorization' => 'Bearer ' . $this->getAccessToken(),
-            'X-Session-ID' => $sessionData['session']
-        ])->get($sessionData['host'] . '/accurate/api/sales-order/list.do', [
-            'fields' => 'number,customer,transDate,totalAmount',
-            'sort' => 'number desc'
-        ]);
-
-        return $response->json()['d'] ?? [];
-    }
-
-    public function createSalesOrder(Request $request)
-    {
-        if (!Storage::exists('accurate_session.json')) {
-            return "ERROR: Session belum dibuat. Silakan login ulang.";
-        }
-        
-        $sessionData = json_decode(Storage::get('accurate_session.json'), true);
-        
-        $payload = [
-            'customerNo' => $request->customerNo, 
-            'detailItem' => [
-                [
-                    'itemNo' => $request->itemNo, 
-                    'unitPrice' => $request->price,
-                    'quantity' => $request->qty
-                ]
-            ],
-            'transDate' => date('d/m/Y'),
-            'description' => 'Input dari Laravel Jastip'
-        ];
-
-        $response = Http::withHeaders([
-            'Authorization' => 'Bearer ' . $this->getAccessToken(),
-            'X-Session-ID' => $sessionData['session']
-        ])->post($sessionData['host'] . '/accurate/api/sales-order/save.do', $payload);
-
-        $result = $response->json();
-
-        // Debugging Error Accurate
-        if (isset($result['s']) && $result['s'] === false) {
-            return dd([
-                'STATUS' => 'GAGAL DARI ACCURATE',
-                'PESAN' => $result['d'],
-                'PAYLOAD' => $payload
-            ]);
-        }
-
-        return back()->with('success', 'Berhasil! No SO: ' . ($result['r']['number'] ?? 'Unknown'));
     }
 }
