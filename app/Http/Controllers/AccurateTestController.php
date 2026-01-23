@@ -61,7 +61,8 @@ class AccurateTestController extends Controller
         $tokenRow = DB::table('accurate_tokens')->where('id', 1)->first();
         if (!$tokenRow) return redirect('/dashboard')->with('warning', 'Belum terhubung.');
 
-        $databaseId = '2335871'; // ID Database Accurate Anda
+        // [SECURE UPDATE] Ambil ID dari .env, bukan hardcode
+        $databaseId = env('ACCURATE_DB_ID');
 
         // Kita pakai HTTP biasa di sini karena ini request inisialisasi session
         $response = Http::withToken($tokenRow->access_token)

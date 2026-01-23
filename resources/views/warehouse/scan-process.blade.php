@@ -37,6 +37,7 @@
             </div>
         </div>
 
+        {{-- UPDATE: Tombol dengan Loading State --}}
         <button type="button" class="btn btn-secondary w-100 py-3 fw-bold fs-5 shadow-sm" id="btnSelesai" disabled onclick="kirimKeAccurate()">
             <i class="fa-solid fa-paper-plane me-2"></i> PROSES KIRIM
         </button>
@@ -62,7 +63,6 @@
                 </thead>
                 <tbody>
                     @foreach($so['detailItem'] as $item)
-                    {{-- UPDATE: Tambahkan data-barcode (UPC No) untuk identifikasi scanner --}}
                     <tr id="row-{{ $item['item']['no'] }}" class="barang-row"
                         data-code="{{ $item['item']['no'] }}" 
                         data-barcode="{{ $item['barcode_asli'] ?? $item['item']['no'] }}" 
@@ -134,15 +134,13 @@
     });
 
     function prosesScan(scannedValue) {
-        // UPDATE: Cari baris berdasarkan data-barcode (UPC No)
         let row = document.querySelector(`.barang-row[data-barcode="${scannedValue}"]`);
 
         if (!row) {
-            showError('SALAH BARANG!', `Barcode <b>${scannedValue}</b> tidak ditemukan dalam daftar pesanan ini.`);
+            showError('SALAH BARANG!', `Barcode <b>${scannedValue}</b> tidak ditemukan.`);
             return;
         }
 
-        // Ambil Item No (SKU) asli untuk pemrosesan data
         let code = row.getAttribute('data-code');
         let name = row.getAttribute('data-name');
         let target = parseInt(row.getAttribute('data-target')) || 0;
@@ -152,12 +150,12 @@
         let current = itemCounts[code];
 
         if ((current + 1) > stockReal) {
-            showError('STOK HABIS!', `Stok di Accurate hanya <b>${stockReal}</b> pcs.<br>Tidak dapat menambah item.`);
+            showError('STOK HABIS!', `Stok hanya <b>${stockReal}</b> pcs.`);
             return;
         }
 
         if (current >= target) {
-            showWarning('SUDAH LENGKAP', `Item <b>${name}</b> sudah terpenuhi sesuai target (${target} pcs).`);
+            showWarning('SUDAH LENGKAP', `Item <b>${name}</b> sudah terpenuhi.`);
             return;
         }
 
@@ -226,6 +224,11 @@
     function kirimKeAccurate() {
         if (inputEl) inputEl.blur();
 
+        // 1. Tampilkan Loading State di Tombol
+        let originalBtnText = btnSelesai.innerHTML;
+        btnSelesai.disabled = true;
+        btnSelesai.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i> MENGIRIM...';
+
         Swal.fire({
             title: 'Memproses DO...',
             html: 'Menghubungkan ke API Accurate...<br><small>Mohon tunggu sebentar</small>',
@@ -274,6 +277,7 @@
                     allowOutsideClick: false
                 }).then((result) => {
                     if (result.isConfirmed) {
+                        // FIX: Gunakan do_id yang dikirim dari controller
                         const urlPDF = `{{ url('/print-do') }}/${data.do_id}`;
                         window.open(urlPDF, '_blank');
                         setTimeout(() => { window.location.href = "{{ url('/scan-so') }}"; }, 2000); 
@@ -283,6 +287,9 @@
                 });
             } else {
                 Swal.fire('Gagal!', data.message, 'error');
+                // Balikin tombol jika gagal
+                btnSelesai.disabled = false;
+                btnSelesai.innerHTML = originalBtnText;
                 if(inputEl) inputEl.focus();
             }
         })
@@ -293,6 +300,9 @@
                 title: 'Gagal Kirim',
                 text: err.message
             });
+            // Balikin tombol jika error
+            btnSelesai.disabled = false;
+            btnSelesai.innerHTML = originalBtnText;
             if(inputEl) inputEl.focus();
         });
     }

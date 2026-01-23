@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Services\AccurateService; // Import Service
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache; // [OPTIMASI] Tambahkan ini
 
 class WarehouseController extends Controller
 {
@@ -17,7 +18,7 @@ class WarehouseController extends Controller
         $this->accurate = $accurate;
     }
 
-    // 1. DASHBOARD
+    // 1. DASHBOARD (OPTIMIZED WITH CACHE)
     public function dashboard()
     {
         // Cek koneksi sederhana (bisa via DB atau coba request ringan)
@@ -31,51 +32,60 @@ class WarehouseController extends Controller
         }
 
         try {
-            // Panggil API via Service
-            $soRes = $this->accurate->get('sales-order/list.do', [
-                'fields' => 'id', 'filter.status.op' => 'NOT_EQUAL', 'filter.status.val' => 'CLOSED', 'sp.pageSize' => 1
-            ]);
-            
-            $doRes = $this->accurate->get('delivery-order/list.do', [
-                'fields' => 'id', 'filter.transDate.op' => 'EQUAL', 'filter.transDate.val' => date('d/m/Y'), 'sp.pageSize' => 1
-            ]);
-
-            $itemRes = $this->accurate->get('item/list.do', [
-                'fields' => 'id', 'sp.pageSize' => 1
-            ]);
-
-            // DATA GRAFIK: 7 Hari Terakhir
-            $chartLabels = [];
-            $chartData = [];
-            
-            for ($i = 6; $i >= 0; $i--) {
-                $dateObj = now()->subDays($i);
-                $dateStr = $dateObj->format('d/m/Y');
-                $chartLabels[] = $dateObj->format('d M');
-
-                $resChart = $this->accurate->get('delivery-order/list.do', [
-                    'fields' => 'id',
-                    'filter.transDate.op' => 'EQUAL',
-                    'filter.transDate.val' => $dateStr,
-                    'sp.pageSize' => 1
-                ]);
+            // [OPTIMASI] Gunakan Cache selama 10 menit (600 detik)
+            // Jadi aplikasi tidak menembak API Accurate terus-menerus
+            $data = Cache::remember('dashboard_data', 600, function () {
                 
-                $chartData[] = $resChart['sp']['rowCount'] ?? 0;
-            }
+                // A. Ambil Statistik
+                $soRes = $this->accurate->get('sales-order/list.do', [
+                    'fields' => 'id', 'filter.status.op' => 'NOT_EQUAL', 'filter.status.val' => 'CLOSED', 'sp.pageSize' => 1
+                ]);
+                $doRes = $this->accurate->get('delivery-order/list.do', [
+                    'fields' => 'id', 'filter.transDate.op' => 'EQUAL', 'filter.transDate.val' => date('d/m/Y'), 'sp.pageSize' => 1
+                ]);
+                $itemRes = $this->accurate->get('item/list.do', [
+                    'fields' => 'id', 'sp.pageSize' => 1
+                ]);
+
+                // B. Ambil Data Grafik 7 Hari
+                $chartLabels = [];
+                $chartData = [];
+                
+                for ($i = 6; $i >= 0; $i--) {
+                    $dateObj = now()->subDays($i);
+                    $dateStr = $dateObj->format('d/m/Y');
+                    $chartLabels[] = $dateObj->format('d M');
+
+                    $resChart = $this->accurate->get('delivery-order/list.do', [
+                        'fields' => 'id',
+                        'filter.transDate.op' => 'EQUAL',
+                        'filter.transDate.val' => $dateStr,
+                        'sp.pageSize' => 1
+                    ]);
+                    $chartData[] = $resChart['sp']['rowCount'] ?? 0;
+                }
+
+                return [
+                    'stats' => [
+                        'pending_so' => $soRes['sp']['rowCount'] ?? 0,
+                        'today_do'   => $doRes['sp']['rowCount'] ?? 0,
+                        'total_items'=> $itemRes['sp']['rowCount'] ?? 0,
+                    ],
+                    'chartLabels' => $chartLabels,
+                    'chartData' => $chartData
+                ];
+            });
 
             return view('warehouse.dashboard', [
-                'stats' => [
-                    'pending_so' => $soRes['sp']['rowCount'] ?? 0,
-                    'today_do'   => $doRes['sp']['rowCount'] ?? 0,
-                    'total_items'=> $itemRes['sp']['rowCount'] ?? 0,
-                ],
-                'chartLabels' => $chartLabels,
-                'chartData' => $chartData,
+                'stats' => $data['stats'],
+                'chartLabels' => $data['chartLabels'],
+                'chartData' => $data['chartData'],
                 'isConnected' => true
             ]);
 
         } catch (\Exception $e) {
             Log::error("Dashboard Error: " . $e->getMessage());
+            // Jika error, return view kosong tanpa cache
             return view('warehouse.dashboard', [
                 'stats' => ['pending_so' => 0, 'today_do' => 0, 'total_items' => 0],
                 'chartLabels' => [], 'chartData' => [], 'isConnected' => false
@@ -108,7 +118,6 @@ class WarehouseController extends Controller
 
         if (!$so) return redirect('/scan-so')->with('error', 'Data SO tidak ditemukan.');
 
-        // Cek Stok Real
         foreach ($so['detailItem'] as &$item) {
             $itemNo = $item['item']['no'];
             try {
@@ -118,10 +127,8 @@ class WarehouseController extends Controller
                     'filter.no.val' => $itemNo
                 ]);
                 $dataBarang = $stokRes['d'][0] ?? [];
-                
                 $item['barcode_asli'] = $dataBarang['upcNo'] ?? $itemNo;
                 $item['stok_gudang'] = $dataBarang['quantity'] ?? 0;
-
             } catch (\Exception $e) {
                 $item['stok_gudang'] = 0; 
                 $item['barcode_asli'] = $itemNo;
@@ -187,7 +194,6 @@ class WarehouseController extends Controller
 
             // C. EKSEKUSI SPLIT
             if ($needsSplit) {
-                // 1. BUAT SO BARU #1 (READY)
                 $payloadReady = [
                     'transDate' => $soData['transDate'],
                     'customerNo' => $soData['customer']['customerNo'],
@@ -198,14 +204,11 @@ class WarehouseController extends Controller
                 if(isset($soData['poNumber'])) $payloadReady['poNumber'] = $soData['poNumber'];
 
                 $resReady = $this->accurate->post('sales-order/save.do', $payloadReady);
+                if (!isset($resReady['r']['id'])) return response()->json(['success' => false, 'message' => 'Gagal buat SO Ready.']);
                 
-                if (!isset($resReady['r']['id'])) {
-                    return response()->json(['success' => false, 'message' => 'Gagal buat SO Ready.']);
-                }
                 $newSoReadyId = $resReady['r']['id'];
                 $newSoReadyNumber = $resReady['r']['number'];
 
-                // 2. BUAT SO BARU #2 (BACKORDER)
                 if (!empty($itemsBackorder)) {
                     $payloadBack = $payloadReady;
                     $payloadBack['description'] = 'Split (Backorder) dari ' . $soNumber;
@@ -213,19 +216,13 @@ class WarehouseController extends Controller
                     $this->accurate->post('sales-order/save.do', $payloadBack);
                 }
 
-                // 3. HAPUS SO LAMA
                 $this->accurate->post('sales-order/delete.do', ['id' => $soId]);
-
-                // 4. SWITCH DATA KE SO BARU
                 $soNumber = $newSoReadyNumber;
                 $newSoDetailRes = $this->accurate->get('sales-order/detail.do', ['id' => $newSoReadyId]);
                 $soData = $newSoDetailRes['d'];
                 
-                // Reset Scan Array agar sesuai dengan SO baru yang qty-nya sudah pas
                 $itemsScanned = [];
-                foreach($soData['detailItem'] as $ln) {
-                    $itemsScanned[$ln['item']['no']] = $ln['quantity'];
-                }
+                foreach($soData['detailItem'] as $ln) $itemsScanned[$ln['item']['no']] = $ln['quantity'];
             }
 
             // D. SUSUN PAYLOAD DO
@@ -273,7 +270,6 @@ class WarehouseController extends Controller
             $result = $this->accurate->post('delivery-order/save.do', $payloadDO);
 
             if (isset($result['r'])) {
-                // F. FORCE CLOSE SO
                 try {
                     $this->accurate->post('sales-order/manual-close-order.do', ['number' => $soNumber, 'orderClosed' => true]);
                 } catch (\Exception $ex) { /* Ignore */ }
@@ -281,6 +277,9 @@ class WarehouseController extends Controller
                 DB::table('local_so_details')
                     ->where('so_number', $request->so_number)
                     ->update(['status' => 'CLOSED', 'updated_at' => now()]);
+
+                // [OPTIMASI] Hapus Cache Dashboard agar data terbaru (DO baru) muncul
+                Cache::forget('dashboard_data');
 
                 // [FIX PENTING] Kirim do_id agar tombol cetak tidak error 'undefined'
                 return response()->json([
