@@ -17,7 +17,7 @@ Route::middleware('guest')->group(function () {
 
 // === 2. AUTH AREA (Area Kerja Staff) ===
 Route::middleware('auth')->group(function () {
-    
+
     // Logout Staff
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
@@ -28,13 +28,15 @@ Route::middleware('auth')->group(function () {
 
     // === GUDANG DASHBOARD ===
     Route::get('/dashboard', [WarehouseController::class, 'dashboard']);
-    
+    // Di dalam group auth, dekat route dashboard
+    Route::get('/dashboard/refresh', [WarehouseController::class, 'refreshDashboard'])->name('dashboard.refresh');
+
     // Fitur Operasional Gudang
-    Route::get('/scan-so', [WarehouseController::class, 'scanSOListPage']); 
+    Route::get('/scan-so', [WarehouseController::class, 'scanSOListPage']);
     Route::get('/scan-process/{id}', [WarehouseController::class, 'scanSODetailPage']);
     Route::post('/scan-process/submit', [WarehouseController::class, 'submitDOWithLocalLookup']);
     Route::get('/print-do/{id}', [WarehouseController::class, 'printDeliveryOrder']);
-    
+
     // Fitur Tambahan
     Route::get('/sales-order/create', [SalesOrderController::class, 'create']);
     Route::post('/sales-order/store', [SalesOrderController::class, 'store']);

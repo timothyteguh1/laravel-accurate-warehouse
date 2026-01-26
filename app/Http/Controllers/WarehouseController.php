@@ -17,6 +17,16 @@ class WarehouseController extends Controller
     {
         $this->accurate = $accurate;
     }
+    // Tambahkan di WarehouseController.php
+
+    public function refreshDashboard()
+    {
+        // 1. Hapus Cache lama
+        Cache::forget('dashboard_data');
+
+        // 2. Redirect kembali ke dashboard (otomatis akan fetch data baru)
+        return redirect('/dashboard')->with('success', 'Data Dashboard berhasil diperbarui dari Accurate!');
+    }
 
     // 1. DASHBOARD (OPTIMIZED WITH CACHE)
     public function dashboard()
@@ -27,7 +37,9 @@ class WarehouseController extends Controller
         if (!$isConnected) {
             return view('warehouse.dashboard', [
                 'stats' => ['pending_so' => 0, 'today_do' => 0, 'total_items' => 0],
-                'chartLabels' => [], 'chartData' => [], 'isConnected' => false
+                'chartLabels' => [],
+                'chartData' => [],
+                'isConnected' => false
             ]);
         }
 
@@ -35,22 +47,29 @@ class WarehouseController extends Controller
             // [OPTIMASI] Gunakan Cache selama 10 menit (600 detik)
             // Jadi aplikasi tidak menembak API Accurate terus-menerus
             $data = Cache::remember('dashboard_data', 600, function () {
-                
+
                 // A. Ambil Statistik
                 $soRes = $this->accurate->get('sales-order/list.do', [
-                    'fields' => 'id', 'filter.status.op' => 'NOT_EQUAL', 'filter.status.val' => 'CLOSED', 'sp.pageSize' => 1
+                    'fields' => 'id',
+                    'filter.status.op' => 'NOT_EQUAL',
+                    'filter.status.val' => 'CLOSED',
+                    'sp.pageSize' => 1
                 ]);
                 $doRes = $this->accurate->get('delivery-order/list.do', [
-                    'fields' => 'id', 'filter.transDate.op' => 'EQUAL', 'filter.transDate.val' => date('d/m/Y'), 'sp.pageSize' => 1
+                    'fields' => 'id',
+                    'filter.transDate.op' => 'EQUAL',
+                    'filter.transDate.val' => date('d/m/Y'),
+                    'sp.pageSize' => 1
                 ]);
                 $itemRes = $this->accurate->get('item/list.do', [
-                    'fields' => 'id', 'sp.pageSize' => 1
+                    'fields' => 'id',
+                    'sp.pageSize' => 1
                 ]);
 
                 // B. Ambil Data Grafik 7 Hari
                 $chartLabels = [];
                 $chartData = [];
-                
+
                 for ($i = 6; $i >= 0; $i--) {
                     $dateObj = now()->subDays($i);
                     $dateStr = $dateObj->format('d/m/Y');
@@ -68,8 +87,8 @@ class WarehouseController extends Controller
                 return [
                     'stats' => [
                         'pending_so' => $soRes['sp']['rowCount'] ?? 0,
-                        'today_do'   => $doRes['sp']['rowCount'] ?? 0,
-                        'total_items'=> $itemRes['sp']['rowCount'] ?? 0,
+                        'today_do' => $doRes['sp']['rowCount'] ?? 0,
+                        'total_items' => $itemRes['sp']['rowCount'] ?? 0,
                     ],
                     'chartLabels' => $chartLabels,
                     'chartData' => $chartData
@@ -88,7 +107,9 @@ class WarehouseController extends Controller
             // Jika error, return view kosong tanpa cache
             return view('warehouse.dashboard', [
                 'stats' => ['pending_so' => 0, 'today_do' => 0, 'total_items' => 0],
-                'chartLabels' => [], 'chartData' => [], 'isConnected' => false
+                'chartLabels' => [],
+                'chartData' => [],
+                'isConnected' => false
             ]);
         }
     }
@@ -99,7 +120,7 @@ class WarehouseController extends Controller
         $response = $this->accurate->get('sales-order/list.do', [
             'fields' => 'id,number,transDate,customer,totalAmount,status',
             'sort' => 'transDate desc',
-            'filter.status.op' => 'NOT_EQUAL', 
+            'filter.status.op' => 'NOT_EQUAL',
             'filter.status.val' => 'CLOSED'
         ]);
 
@@ -116,21 +137,22 @@ class WarehouseController extends Controller
         $response = $this->accurate->get('sales-order/detail.do', ['id' => $id]);
         $so = $response['d'] ?? null;
 
-        if (!$so) return redirect('/scan-so')->with('error', 'Data SO tidak ditemukan.');
+        if (!$so)
+            return redirect('/scan-so')->with('error', 'Data SO tidak ditemukan.');
 
         foreach ($so['detailItem'] as &$item) {
             $itemNo = $item['item']['no'];
             try {
                 $stokRes = $this->accurate->get('item/list.do', [
                     'fields' => 'quantity,upcNo',
-                    'filter.no.op' => 'EQUAL',    
+                    'filter.no.op' => 'EQUAL',
                     'filter.no.val' => $itemNo
                 ]);
                 $dataBarang = $stokRes['d'][0] ?? [];
                 $item['barcode_asli'] = $dataBarang['upcNo'] ?? $itemNo;
                 $item['stok_gudang'] = $dataBarang['quantity'] ?? 0;
             } catch (\Exception $e) {
-                $item['stok_gudang'] = 0; 
+                $item['stok_gudang'] = 0;
                 $item['barcode_asli'] = $itemNo;
             }
         }
@@ -142,28 +164,30 @@ class WarehouseController extends Controller
     public function submitDOWithLocalLookup(Request $request)
     {
         $soNumber = $request->so_number;
-        $itemsScanned = $request->items; 
+        $itemsScanned = $request->items;
 
         try {
             // A. TARIK DATA SO ASLI
             $findSo = $this->accurate->get('sales-order/list.do', ['filter.number.op' => 'EQUAL', 'filter.number.val' => $soNumber]);
             $soId = $findSo['d'][0]['id'] ?? null;
-            if (!$soId) return response()->json(['success' => false, 'message' => 'SO ID tidak ditemukan.']);
+            if (!$soId)
+                return response()->json(['success' => false, 'message' => 'SO ID tidak ditemukan.']);
 
             $soDetailRes = $this->accurate->get('sales-order/detail.do', ['id' => $soId]);
             $soData = $soDetailRes['d'] ?? null;
-            if (!$soData) return response()->json(['success' => false, 'message' => 'Gagal tarik detail SO.']);
+            if (!$soData)
+                return response()->json(['success' => false, 'message' => 'Gagal tarik detail SO.']);
 
             // B. CEK SPLIT
-            $itemsReady = [];    
-            $itemsBackorder = []; 
+            $itemsReady = [];
+            $itemsBackorder = [];
             $needsSplit = false;
 
             foreach ($soData['detailItem'] as $line) {
                 $sku = $line['item']['no'];
-                $barcode = $line['item']['upcNo'] ?? $sku; 
+                $barcode = $line['item']['upcNo'] ?? $sku;
                 $qtyOrder = (float) $line['quantity'];
-                
+
                 $qtyScan = 0;
                 if (isset($itemsScanned[$barcode])) {
                     $qtyScan = (float) $itemsScanned[$barcode];
@@ -173,8 +197,8 @@ class WarehouseController extends Controller
 
                 if ($qtyScan > 0) {
                     $lineReady = $line;
-                    $lineReady['quantity'] = $qtyScan; 
-                    unset($lineReady['id']); 
+                    $lineReady['quantity'] = $qtyScan;
+                    unset($lineReady['id']);
                     $itemsReady[] = $lineReady;
                 }
 
@@ -190,7 +214,8 @@ class WarehouseController extends Controller
                 }
             }
 
-            if (empty($itemsReady)) return response()->json(['success' => false, 'message' => 'Tidak ada barang yang discan!']);
+            if (empty($itemsReady))
+                return response()->json(['success' => false, 'message' => 'Tidak ada barang yang discan!']);
 
             // C. EKSEKUSI SPLIT
             if ($needsSplit) {
@@ -200,12 +225,15 @@ class WarehouseController extends Controller
                     'description' => 'Split (Ready) dari ' . $soNumber,
                     'detailItem' => $this->formatDetailForSave($itemsReady)
                 ];
-                if(isset($soData['branch'])) $payloadReady['branch'] = ['id' => $soData['branch']['id']];
-                if(isset($soData['poNumber'])) $payloadReady['poNumber'] = $soData['poNumber'];
+                if (isset($soData['branch']))
+                    $payloadReady['branch'] = ['id' => $soData['branch']['id']];
+                if (isset($soData['poNumber']))
+                    $payloadReady['poNumber'] = $soData['poNumber'];
 
                 $resReady = $this->accurate->post('sales-order/save.do', $payloadReady);
-                if (!isset($resReady['r']['id'])) return response()->json(['success' => false, 'message' => 'Gagal buat SO Ready.']);
-                
+                if (!isset($resReady['r']['id']))
+                    return response()->json(['success' => false, 'message' => 'Gagal buat SO Ready.']);
+
                 $newSoReadyId = $resReady['r']['id'];
                 $newSoReadyNumber = $resReady['r']['number'];
 
@@ -220,9 +248,10 @@ class WarehouseController extends Controller
                 $soNumber = $newSoReadyNumber;
                 $newSoDetailRes = $this->accurate->get('sales-order/detail.do', ['id' => $newSoReadyId]);
                 $soData = $newSoDetailRes['d'];
-                
+
                 $itemsScanned = [];
-                foreach($soData['detailItem'] as $ln) $itemsScanned[$ln['item']['no']] = $ln['quantity'];
+                foreach ($soData['detailItem'] as $ln)
+                    $itemsScanned[$ln['item']['no']] = $ln['quantity'];
             }
 
             // D. SUSUN PAYLOAD DO
@@ -230,7 +259,7 @@ class WarehouseController extends Controller
             foreach ($soData['detailItem'] as $accLine) {
                 $accSku = $accLine['item']['no'];
                 $qtyToShip = 0;
-                
+
                 if ($needsSplit) {
                     $qtyToShip = $accLine['quantity'];
                 } else {
@@ -249,10 +278,13 @@ class WarehouseController extends Controller
                         'quantity' => $qtyToShip,
                         'itemUnit' => $accLine['itemUnit'] ?? null,
                     ];
-                    
-                    if (isset($accLine['warehouse'])) $linePayload['warehouse'] = ['id' => $accLine['warehouse']['id']];
-                    if (isset($accLine['department'])) $linePayload['department'] = ['id' => $accLine['department']['id']];
-                    if (isset($accLine['project'])) $linePayload['project'] = ['id' => $accLine['project']['id']];
+
+                    if (isset($accLine['warehouse']))
+                        $linePayload['warehouse'] = ['id' => $accLine['warehouse']['id']];
+                    if (isset($accLine['department']))
+                        $linePayload['department'] = ['id' => $accLine['department']['id']];
+                    if (isset($accLine['project']))
+                        $linePayload['project'] = ['id' => $accLine['project']['id']];
 
                     $detailItemPayload[] = $linePayload;
                 }
@@ -265,14 +297,16 @@ class WarehouseController extends Controller
                 'customerNo' => $soData['customer']['customerNo'],
                 'detailItem' => $detailItemPayload
             ];
-            if (isset($soData['branch'])) $payloadDO['branch'] = ['id' => $soData['branch']['id']];
+            if (isset($soData['branch']))
+                $payloadDO['branch'] = ['id' => $soData['branch']['id']];
 
             $result = $this->accurate->post('delivery-order/save.do', $payloadDO);
 
             if (isset($result['r'])) {
                 try {
                     $this->accurate->post('sales-order/manual-close-order.do', ['number' => $soNumber, 'orderClosed' => true]);
-                } catch (\Exception $ex) { /* Ignore */ }
+                } catch (\Exception $ex) { /* Ignore */
+                }
 
                 DB::table('local_so_details')
                     ->where('so_number', $request->so_number)
@@ -303,7 +337,8 @@ class WarehouseController extends Controller
         $response = $this->accurate->get('delivery-order/detail.do', ['id' => $id]);
         $data = $response['d'] ?? null;
 
-        if (!$data) return response("Data DO tidak ditemukan.", 404);
+        if (!$data)
+            return response("Data DO tidak ditemukan.", 404);
         return view('warehouse.print-do', ['do' => $data]);
     }
 
@@ -311,12 +346,12 @@ class WarehouseController extends Controller
     public function historyDOPage(Request $request)
     {
         $response = $this->accurate->get('sales-order/list.do', [
-            'fields' => 'id,number,transDate,customer,description,status,totalAmount', 
+            'fields' => 'id,number,transDate,customer,description,status,totalAmount',
             'filter.status.op' => 'EQUAL',
             'filter.status.val' => 'CLOSED',
-            'sort'   => 'transDate desc',
+            'sort' => 'transDate desc',
             'sp.pageSize' => 20,
-            'sp.page' => $request->query('page', 1) 
+            'sp.page' => $request->query('page', 1)
         ]);
 
         if (isset($response['status']) && $response['status'] === false) {
@@ -334,17 +369,17 @@ class WarehouseController extends Controller
     {
         $response = $this->accurate->get('delivery-order/list.do', [
             'fields' => 'id,number,description',
-            'sort'   => 'transDate desc',
-            'sp.pageSize' => 100 
+            'sort' => 'transDate desc',
+            'sp.pageSize' => 100
         ]);
 
         $doList = $response['d'] ?? [];
         $foundDOId = null;
-        
+
         foreach ($doList as $do) {
             if (isset($do['description']) && str_contains($do['description'], $soNumber)) {
                 $foundDOId = $do['id'];
-                break; 
+                break;
             }
         }
 
@@ -356,7 +391,8 @@ class WarehouseController extends Controller
     }
 
     // HELPER FORMAT SAVE
-    private function formatDetailForSave($items) {
+    private function formatDetailForSave($items)
+    {
         $formatted = [];
         foreach ($items as $item) {
             $unitName = null;
@@ -370,19 +406,27 @@ class WarehouseController extends Controller
                 'itemNo' => $item['item']['no'],
                 'unitPrice' => $item['unitPrice'],
                 'quantity' => $item['quantity'],
-                'itemUnit' => $unitName, 
+                'itemUnit' => $unitName,
             ];
 
-            if(isset($item['itemDiscPercent'])) $row['itemDiscPercent'] = $item['itemDiscPercent'];
-            if(isset($item['warehouse'])) $row['warehouse'] = ['id' => $item['warehouse']['id']];
-            if(isset($item['department'])) $row['department'] = ['id' => $item['department']['id']];
-            if(isset($item['project'])) $row['project'] = ['id' => $item['project']['id']];
-            
+            if (isset($item['itemDiscPercent']))
+                $row['itemDiscPercent'] = $item['itemDiscPercent'];
+            if (isset($item['warehouse']))
+                $row['warehouse'] = ['id' => $item['warehouse']['id']];
+            if (isset($item['department']))
+                $row['department'] = ['id' => $item['department']['id']];
+            if (isset($item['project']))
+                $row['project'] = ['id' => $item['project']['id']];
+
             $formatted[] = $row;
         }
         return $formatted;
     }
-    
-    public function generateDummyData() {}
-    public function fillDummyStock() {}
+
+    public function generateDummyData()
+    {
+    }
+    public function fillDummyStock()
+    {
+    }
 }
