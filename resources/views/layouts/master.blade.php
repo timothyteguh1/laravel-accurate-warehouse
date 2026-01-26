@@ -5,6 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Warehouse Pro</title>
+    
+    {{-- CSS Lokal (Pastikan file ini ada sesuai rencana optimasi sebelumnya) --}}
+    {{-- Jika belum ada, ganti asset(...) dengan link CDN Bootstrap --}}
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -15,7 +18,7 @@
             background-color: #F3F4F6;
         }
 
-        /* Sidebar */
+        /* Sidebar Styling */
         .sidebar {
             width: 260px;
             height: 100vh;
@@ -44,6 +47,7 @@
             color: #6B7280;
             font-weight: 500;
             transition: 0.2s;
+            text-decoration: none;
         }
 
         .nav-link:hover,
@@ -79,14 +83,58 @@
             box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
         }
         
-        /* Dropdown User Profile Customization */
         .user-dropdown-toggle {
             cursor: pointer;
+        }
+
+        /* =========================================
+           LOADING SCENE CSS (Global Loader)
+           ========================================= */
+        #global-loader {
+            position: fixed;
+            z-index: 99999;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.9); /* Background putih semi-transparan */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.4s ease, visibility 0.4s ease;
+        }
+
+        /* Animasi Spinner (Modern Circle) */
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #e5e7eb; /* Warna abu muda */
+            border-top: 5px solid #2563EB; /* Warna Biru Utama */
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Class untuk menyembunyikan loader */
+        .loader-hidden {
+            opacity: 0;
+            visibility: hidden;
         }
     </style>
 </head>
 
 <body>
+
+    <div id="global-loader">
+        <div class="text-center">
+            <div class="spinner mb-3 mx-auto"></div>
+            <h6 class="text-primary fw-bold animate__animated animate__pulse animate__infinite">Memuat...</h6>
+        </div>
+    </div>
 
     <div class="sidebar">
         <div class="brand">
@@ -106,6 +154,7 @@
                 <i class="fa-solid fa-clipboard-check"></i> SO Selesai (Closed)
             </a>
 
+            {{-- Tambahan menu Inventory --}}
             <a href="{{ url('/inventory') }}" class="nav-link {{ Request::is('inventory*') ? 'active' : '' }}">
                 <i class="fa-solid fa-boxes-stacked"></i> Inventory
             </a>
@@ -133,7 +182,6 @@
                     <li><a class="dropdown-item" href="#"><i class="fa-solid fa-gear me-2"></i> Settings</a></li>
                     <li><hr class="dropdown-divider"></li>
                     <li>
-                        {{-- PERBAIKAN DI SINI: Ganti route ke 'logout' --}}
                         <form action="{{ route('logout') }}" method="POST">
                             @csrf
                             <button type="submit" class="dropdown-item text-danger">
@@ -150,6 +198,52 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // 1. Saat Halaman Selesai Loading -> Sembunyikan Loader
+        window.addEventListener("load", function () {
+            const loader = document.getElementById("global-loader");
+            loader.classList.add("loader-hidden");
+        });
+
+        // 2. Deteksi Navigasi Browser (Back/Forward Button)
+        // Agar loader hilang jika user tekan tombol Back di browser
+        window.addEventListener("pageshow", function (event) {
+            if (event.persisted) {
+                const loader = document.getElementById("global-loader");
+                loader.classList.add("loader-hidden");
+            }
+        });
+
+        // 3. Saat Klik Link (Pindah Halaman) -> Munculkan Loader
+        document.addEventListener("DOMContentLoaded", function() {
+            const links = document.querySelectorAll("a");
+            const forms = document.querySelectorAll("form");
+
+            // Handle Link Click
+            links.forEach(function(link) {
+                link.addEventListener("click", function(e) {
+                    const href = link.getAttribute("href");
+                    const target = link.getAttribute("target");
+
+                    // Validasi: Munculkan loader HANYA JIKA link valid & bukan tab baru
+                    if (href && href !== "#" && href !== "javascript:void(0)" && target !== "_blank") {
+                        // Jangan munculkan loader jika klik link dropdown (toggle)
+                        if (!link.classList.contains("dropdown-toggle") && !link.hasAttribute("data-bs-toggle")) {
+                            document.getElementById("global-loader").classList.remove("loader-hidden");
+                        }
+                    }
+                });
+            });
+
+            // Handle Form Submit (Logout, dll)
+            forms.forEach(function(form) {
+                form.addEventListener("submit", function() {
+                    document.getElementById("global-loader").classList.remove("loader-hidden");
+                });
+            });
+        });
+    </script>
 </body>
 
 </html>
