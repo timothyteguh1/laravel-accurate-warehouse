@@ -114,21 +114,52 @@ class WarehouseController extends Controller
         }
     }
 
-    // 2. SCAN SO LIST PAGE
-    public function scanSOListPage()
+ 
+    // 2. SCAN SO LIST PAGE (UPDATED WITH SEARCH AJAX)
+    public function scanSOListPage(Request $request)
     {
-        $response = $this->accurate->get('sales-order/list.do', [
+        // Parameter Default
+        $params = [
             'fields' => 'id,number,transDate,customer,totalAmount,status',
-            'sort' => 'transDate desc',
-            'filter.status.op' => 'NOT_EQUAL',
-            'filter.status.val' => 'CLOSED'
-        ]);
+            'sort'   => 'transDate desc',
+        ];
+
+        // LOGIKA FILTERING
+        // Accurate API mendukung multiple filter, tapi kita harus hati-hati menyusunnya.
+        // Kita prioritaskan cari "Nomor" atau "Customer" jika ada input search.
+        
+        if ($request->has('search') && !empty($request->search)) {
+            // Jika user mengetik sesuatu, kita cari berdasarkan NOMOR SO
+            // Note: Accurate API List biasanya single-entity filter. 
+            // Kita gunakan 'CONTAIN' untuk pencarian parsial.
+            $params['filter.number.op'] = 'CONTAIN';
+            $params['filter.number.val'] = $request->search;
+        } else {
+            // Jika TIDAK mencari, tampilkan default: Status != CLOSED
+            // Kita tidak memfilter status saat searching agar user tetap bisa mencari SO lama/closed jika mau,
+            // atau Anda bisa tetap memaksakan filter status jika diinginkan.
+            $params['filter.status.op'] = 'NOT_EQUAL';
+            $params['filter.status.val'] = 'CLOSED';
+        }
+
+        $response = $this->accurate->get('sales-order/list.do', $params);
 
         if (isset($response['status']) && $response['status'] === false) {
+            if ($request->ajax()) {
+                return response()->json(['error' => 'Koneksi Accurate bermasalah'], 500);
+            }
             return redirect('/accurate/auth')->with('warning', 'Koneksi Accurate terputus.');
         }
 
-        return view('warehouse.scan-so', ['orders' => $response['d'] ?? []]);
+        $orders = $response['d'] ?? [];
+
+        // JIKA AJAX -> Return Partial View (Hanya Tabel)
+        if ($request->ajax()) {
+            return view('warehouse.partials.table-scan', ['orders' => $orders])->render();
+        }
+
+        // JIKA BIASA -> Return Full View
+        return view('warehouse.scan-so', ['orders' => $orders]);
     }
 
     // 3. SCAN SO DETAIL PAGE
@@ -345,22 +376,47 @@ class WarehouseController extends Controller
     // 6. HISTORY PAGE
     public function historyDOPage(Request $request)
     {
-        $response = $this->accurate->get('sales-order/list.do', [
+        // Parameter Default: Selalu filter Status = CLOSED
+        $params = [
             'fields' => 'id,number,transDate,customer,description,status,totalAmount',
             'filter.status.op' => 'EQUAL',
             'filter.status.val' => 'CLOSED',
             'sort' => 'transDate desc',
             'sp.pageSize' => 20,
             'sp.page' => $request->query('page', 1)
-        ]);
+        ];
+
+        // LOGIKA PENCARIAN
+        if ($request->has('search') && !empty($request->search)) {
+            // Tambahkan filter Nomor SO (CONTAIN = Mengandung kata kunci)
+            // Accurate API mendukung multiple filter (status & number sekaligus)
+            $params['filter.number.op'] = 'CONTAIN';
+            $params['filter.number.val'] = $request->search;
+        }
+
+        $response = $this->accurate->get('sales-order/list.do', $params);
 
         if (isset($response['status']) && $response['status'] === false) {
+            if ($request->ajax()) {
+                return response()->json(['error' => 'Koneksi Accurate bermasalah'], 500);
+            }
             return redirect('/dashboard')->with('error', 'Koneksi terputus.');
         }
 
+        $orders = $response['d'] ?? [];
+        $page = $response['sp']['page'] ?? 1;
+
+        // JIKA AJAX -> Return Partial View (Hanya Tabel)
+        if ($request->ajax()) {
+            return view('warehouse.partials.table-history', [
+                'orders' => $orders
+            ])->render();
+        }
+
+        // JIKA BIASA -> Return Full View
         return view('warehouse.history-api', [
-            'orders' => $response['d'] ?? [],
-            'page' => $response['sp']['page'] ?? 1
+            'orders' => $orders,
+            'page' => $page
         ]);
     }
 

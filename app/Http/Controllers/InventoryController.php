@@ -18,27 +18,44 @@ class InventoryController extends Controller
 
     public function index(Request $request)
     {
-        // 1. Panggil API via Service (Otomatis handle header & token)
-        $response = $this->accurate->get('item/list.do', [
-            // Field yang diminta: No, Nama, Stok, Harga Jual, Jenis Barang
+        // 1. Siapkan Parameter Default
+        $params = [
             'fields' => 'id,no,name,quantity,unitPrice,itemType,unit1Name',
             'sp.pageSize' => 50,
             'sp.page' => $request->query('page', 1)
-        ]);
+        ];
 
-        // 2. Cek apakah Token Expired / Koneksi Putus
+        // 2. Logika Pencarian (Jika ada input search)
+        if ($request->has('search') && !empty($request->search)) {
+            // Filter 'keywords' di Accurate mencari di field No Item & Name sekaligus
+            $params['filter.keywords.op'] = 'CONTAIN';
+            $params['filter.keywords.val'] = $request->search;
+        }
+
+        // 3. Panggil API
+        $response = $this->accurate->get('item/list.do', $params);
+
+        // Cek Error Koneksi
         if (isset($response['status']) && $response['status'] === false) {
-             // Opsional: Redirect ke auth jika benar-benar putus, tapi dengan pesan jelas
-             return redirect('/accurate/auth')->with('warning', 'Koneksi Accurate terputus. Silakan hubungkan ulang.');
+             if ($request->ajax()) {
+                 return response()->json(['error' => 'Koneksi Accurate bermasalah'], 500);
+             }
+             return redirect('/accurate/auth')->with('warning', 'Koneksi Accurate terputus.');
         }
 
         $items = $response['d'] ?? [];
         $pagination = $response['sp'] ?? [];
+        $currentPage = $pagination['page'] ?? 1;
 
-        // 3. Tampilkan View (Tidak akan mental ke dashboard lagi)
+        // 4. JIKA AJAX -> Return Partial View (Hanya Tabel)
+        if ($request->ajax()) {
+            return view('inventory.partials.table', ['items' => $items])->render();
+        }
+
+        // 5. JIKA BIASA -> Return Full View
         return view('inventory.index', [
             'items' => $items,
-            'page' => $pagination['page'] ?? 1
+            'page' => $currentPage
         ]);
     }
 }

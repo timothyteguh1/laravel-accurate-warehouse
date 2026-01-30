@@ -4,6 +4,23 @@
 
 @section('content')
 <div class="container-fluid">
+    
+    {{-- SEARCH BAR BARU --}}
+    <div class="row mb-3">
+        <div class="col-md-5">
+            <div class="input-group shadow-sm">
+                <span class="input-group-text bg-white border-end-0">
+                    <i class="fa-solid fa-search text-muted"></i>
+                </span>
+                <input type="text" id="searchInput" class="form-control border-start-0 ps-0" 
+                       placeholder="Cari Kode atau Nama Barang..." autocomplete="off">
+                <span class="input-group-text bg-white text-primary" id="loadingIcon" style="display:none;">
+                    <i class="fa-solid fa-circle-notch fa-spin"></i>
+                </span>
+            </div>
+        </div>
+    </div>
+
     <div class="card card-custom border-0 shadow-sm">
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -17,38 +34,10 @@
                             <th class="px-4 py-3">Harga Jual</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        @forelse($items as $item)
-                        <tr>
-                            <td class="px-4 fw-bold text-primary">{{ $item['no'] }}</td>
-                            <td class="px-4">
-                                <div class="fw-medium text-dark">{{ $item['name'] }}</div>
-                                <small class="text-muted">ID: {{ $item['id'] }}</small>
-                            </td>
-                            <td class="px-4">
-                                @if($item['itemType'] == 'INVENTORY')
-                                    <span class="badge bg-info bg-opacity-10 text-info px-2">Barang Persediaan</span>
-                                @else
-                                    <span class="badge bg-secondary bg-opacity-10 text-secondary px-2">Jasa / Non-Persediaan</span>
-                                @endif
-                            </td>
-                            <td class="px-4 text-center">
-                                <span class="fw-bold {{ ($item['quantity'] ?? 0) <= 0 ? 'text-danger' : 'text-dark' }}">
-                                    {{ number_format($item['quantity'] ?? 0, 0, ',', '.') }}
-                                </span>
-                                <small class="text-muted">{{ $item['unit1Name'] ?? '' }}</small>
-                            </td>
-                            <td class="px-4">
-                                <div class="fw-bold text-success">
-                                    Rp {{ number_format($item['unitPrice'] ?? 0, 0, ',', '.') }}
-                                </div>
-                            </td>
-                        </tr>
-                        @empty
-                        <tr>
-                            <td colspan="5" class="text-center py-5 text-muted">Data tidak ditemukan.</td>
-                        </tr>
-                        @endforelse
+                    
+                    {{-- ID UNTUK TARGET AJAX --}}
+                    <tbody id="tableBody">
+                        @include('inventory.partials.table', ['items' => $items])
                     </tbody>
                 </table>
             </div>
@@ -58,6 +47,8 @@
                 <div>
                     @if($page > 1)
                         <a href="{{ url('/inventory?page=' . ($page - 1)) }}" class="btn btn-white border shadow-sm btn-sm me-1">Prev</a>
+                    @else
+                        <button class="btn btn-white border shadow-sm btn-sm me-1" disabled>Prev</button>
                     @endif
                     <a href="{{ url('/inventory?page=' . ($page + 1)) }}" class="btn btn-white border shadow-sm btn-sm">Next</a>
                 </div>
@@ -65,4 +56,45 @@
         </div>
     </div>
 </div>
+
+{{-- SCRIPT AJAX DEBOUNCE --}}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        let timeout = null;
+        const searchInput = document.getElementById('searchInput');
+        const tableBody = document.getElementById('tableBody');
+        const loadingIcon = document.getElementById('loadingIcon');
+
+        searchInput.addEventListener('keyup', function() {
+            const query = this.value;
+
+            // Clear timer sebelumnya
+            clearTimeout(timeout);
+            loadingIcon.style.display = 'block';
+
+            // Tunggu 600ms (Debounce)
+            timeout = setTimeout(function() {
+                fetchInventory(query);
+            }, 600);
+        });
+
+        function fetchInventory(query) {
+            const url = `{{ url('/inventory') }}?search=${encodeURIComponent(query)}`;
+
+            fetch(url, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+            .then(response => response.text())
+            .then(html => {
+                tableBody.innerHTML = html;
+                loadingIcon.style.display = 'none';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                loadingIcon.style.display = 'none';
+                tableBody.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-4">Gagal memuat data.</td></tr>';
+            });
+        }
+    });
+</script>
 @endsection

@@ -6,12 +6,28 @@
 <div class="card-custom bg-white p-4 shadow-sm">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h5 class="fw-bold mb-0">Antrian Pesanan (All Source)</h5>
-            <small class="text-muted">Mendukung SO dari Accurate Web & Aplikasi</small>
+            <h5 class="fw-bold mb-0">Antrian Pesanan</h5>
+            <small class="text-muted">Cari berdasarkan Nomor SO</small>
         </div>
         <button class="btn btn-primary btn-sm" onclick="location.reload()">
-            <i class="fa-solid fa-sync"></i> Refresh Data
+            <i class="fa-solid fa-sync"></i> Refresh
         </button>
+    </div>
+
+    {{-- SEARCH BAR BARU --}}
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <div class="input-group">
+                <span class="input-group-text bg-white border-end-0">
+                    <i class="fa-solid fa-search text-muted"></i>
+                </span>
+                <input type="text" id="searchInput" class="form-control border-start-0 ps-0" 
+                       placeholder="Ketik Nomor SO (Cth: SO.2024...)" autocomplete="off">
+                <span class="input-group-text bg-white text-primary" id="loadingIcon" style="display:none;">
+                    <i class="fa-solid fa-circle-notch fa-spin"></i>
+                </span>
+            </div>
+        </div>
     </div>
 
     <div class="table-responsive">
@@ -26,49 +42,57 @@
                     <th class="text-end">Aksi</th>
                 </tr>
             </thead>
-            <tbody>
-                @forelse($orders as $order)
-                <tr>
-                    <td class="fw-bold text-primary">
-                        {{ $order['number'] }}
-                    </td>
-                    <td>{{ $order['transDate'] }}</td>
-                    <td>{{ $order['customer']['name'] ?? '-' }}</td>
-                    <td class="text-end fw-bold">Rp {{ number_format($order['totalAmount'], 0, ',', '.') }}</td>
-                    
-                    <td class="text-center">
-                        @if(strtoupper($order['status']) == 'CLOSED')
-                            <span class="badge bg-success"><i class="fa-check-circle me-1"></i> SELESAI</span>
-                        @elseif(strtoupper($order['status']) == 'PROCESSED')
-                            <span class="badge bg-primary"><i class="fa-truck-loading me-1"></i> DIPROSES</span>
-                        @else
-                            <span class="badge bg-warning text-dark"><i class="fa-clock me-1"></i> ANTRIAN</span>
-                        @endif
-                    </td>
-
-                    <td class="text-end">
-                        @if(strtoupper($order['status']) == 'CLOSED')
-                            <button class="btn btn-sm btn-secondary disabled" title="Sudah Selesai">
-                                <i class="fa-solid fa-check"></i> Selesai
-                            </button>
-                        @else
-                            {{-- SEMUA SO BISA DISCAN --}}
-                            <a href="{{ url('/scan-process/'.$order['id']) }}" class="btn btn-primary btn-sm fw-bold px-3 shadow-sm">
-                                <i class="fa-solid fa-barcode me-1"></i> Mulai Scan
-                            </a>
-                        @endif
-                    </td>
-                </tr>
-                @empty
-                <tr>
-                    <td colspan="6" class="text-center py-5 text-muted">
-                        <i class="fa-solid fa-box-open fs-1 mb-3 d-block opacity-25"></i>
-                        Tidak ada Sales Order aktif saat ini.
-                    </td>
-                </tr>
-                @endforelse
+            {{-- ID UNTUK TARGET AJAX --}}
+            <tbody id="tableBody">
+                @include('warehouse.partials.table-scan', ['orders' => $orders])
             </tbody>
         </table>
     </div>
 </div>
+
+{{-- SCRIPT AJAX DEBOUNCE --}}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        let timeout = null;
+        const searchInput = document.getElementById('searchInput');
+        const tableBody = document.getElementById('tableBody');
+        const loadingIcon = document.getElementById('loadingIcon');
+
+        searchInput.addEventListener('keyup', function() {
+            const query = this.value;
+
+            // Clear timer sebelumnya (Debounce logic)
+            clearTimeout(timeout);
+
+            // Tampilkan loading
+            loadingIcon.style.display = 'block';
+
+            // Set timer baru (tunggu 600ms setelah user selesai mengetik)
+            timeout = setTimeout(function() {
+                fetchOrders(query);
+            }, 600);
+        });
+
+        function fetchOrders(query) {
+            // URL saat ini + parameter search
+            const url = `{{ url('/scan-so') }}?search=${encodeURIComponent(query)}`;
+
+            fetch(url, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest' // Menandai ini request AJAX
+                }
+            })
+            .then(response => response.text())
+            .then(html => {
+                tableBody.innerHTML = html; // Ganti isi tbody
+                loadingIcon.style.display = 'none';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                loadingIcon.style.display = 'none';
+                tableBody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Gagal memuat data. Cek koneksi internet/Accurate.</td></tr>';
+            });
+        }
+    });
+</script>
 @endsection
