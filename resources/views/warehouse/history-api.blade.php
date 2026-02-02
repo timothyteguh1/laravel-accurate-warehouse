@@ -1,12 +1,12 @@
 @extends('layouts.master')
 
-@section('header', 'Riwayat SO Selesai (Closed)')
+@section('header', 'Riwayat Selesai (Processed/Closed)')
 
 @section('content')
 <div class="container-fluid">
-    <div class="alert alert-success border-0 shadow-sm mb-4">
-        <i class="fa-solid fa-check-circle me-2"></i>
-        Menampilkan Sales Order yang statusnya <b>CLOSED</b> (Selesai).
+    <div class="alert alert-info border-0 shadow-sm mb-4">
+        <i class="fa-solid fa-info-circle me-2"></i>
+        Halaman ini menampilkan pesanan yang <b>Sudah Diproses (Ada DO)</b> atau <b>Sudah Lunas (Closed)</b>.
     </div>
 
     {{-- SEARCH BAR --}}
@@ -34,19 +34,16 @@
                             <th class="px-4 py-3">Tgl. Transaksi</th>
                             <th class="px-4 py-3">Nomor SO</th>
                             <th class="px-4 py-3">Pelanggan</th>
-                            <th class="px-4 py-3">Nilai Total</th>
+                            <th class="px-4 py-3">Status</th>
                             <th class="px-4 py-3 text-end">Aksi</th>
                         </tr>
                     </thead>
-                    
-                    {{-- ID UNTUK TARGET AJAX --}}
                     <tbody id="tableBody">
                         @include('warehouse.partials.table-history', ['orders' => $orders])
                     </tbody>
                 </table>
             </div>
 
-            {{-- Pagination (Disembunyikan jika sedang search agar tidak bingung, atau biarkan reload normal) --}}
             <div class="d-flex justify-content-between align-items-center p-3 border-top bg-light">
                 <span class="text-muted small">Halaman {{ $page }}</span>
                 <div>
@@ -62,7 +59,6 @@
     </div>
 </div>
 
-{{-- SCRIPT AJAX DEBOUNCE (Sama dengan Scan SO) --}}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         let timeout = null;
@@ -72,33 +68,23 @@
 
         searchInput.addEventListener('keyup', function() {
             const query = this.value;
-
-            // Clear timer sebelumnya
             clearTimeout(timeout);
             loadingIcon.style.display = 'block';
-
-            // Tunggu 600ms setelah user berhenti mengetik
             timeout = setTimeout(function() {
-                fetchHistory(query);
+                fetch(`{{ url('/history-do') }}?search=${encodeURIComponent(query)}`, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                })
+                .then(response => response.text())
+                .then(html => {
+                    tableBody.innerHTML = html;
+                    loadingIcon.style.display = 'none';
+                })
+                .catch(error => {
+                    console.error(error);
+                    loadingIcon.style.display = 'none';
+                });
             }, 600);
         });
-
-        function fetchHistory(query) {
-            const url = `{{ url('/history-do') }}?search=${encodeURIComponent(query)}`;
-
-            fetch(url, {
-                headers: { 'X-Requested-With': 'XMLHttpRequest' }
-            })
-            .then(response => response.text())
-            .then(html => {
-                tableBody.innerHTML = html;
-                loadingIcon.style.display = 'none';
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                loadingIcon.style.display = 'none';
-            });
-        }
     });
 </script>
 @endsection
