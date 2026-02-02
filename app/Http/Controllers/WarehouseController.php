@@ -23,31 +23,80 @@ class WarehouseController extends Controller
         return redirect('/dashboard')->with('success', 'Data Dashboard berhasil diperbarui!');
     }
 
-    // --- 1. DASHBOARD ---
+   // --- 1. DASHBOARD ---
     public function dashboard()
     {
         $isConnected = DB::table('accurate_tokens')->where('id', 1)->exists();
+        
         if (!$isConnected) {
-            return view('warehouse.dashboard', ['stats' => ['pending_so' => 0, 'today_do' => 0, 'total_items' => 0], 'chartLabels' => [], 'chartData' => [], 'isConnected' => false]);
+            return view('warehouse.dashboard', [
+                'stats' => ['pending_so' => 0, 'today_do' => 0, 'total_items' => 0], 
+                'chartLabels' => [], 
+                'chartData' => [], 
+                'isConnected' => false
+            ]);
         }
+
         try {
+            // Cache data selama 10 menit agar tidak membebani API Accurate
             $data = Cache::remember('dashboard_data', 600, function () {
-                $soRes = $this->accurate->get('sales-order/list.do', ['fields' => 'id', 'filter.status.op' => 'NOT_EQUAL', 'filter.status.val' => 'CLOSED', 'sp.pageSize' => 1]);
-                $doRes = $this->accurate->get('delivery-order/list.do', ['fields' => 'id', 'filter.transDate.op' => 'EQUAL', 'filter.transDate.val' => date('d/m/Y'), 'sp.pageSize' => 1]);
-                $itemRes = $this->accurate->get('item/list.do', ['fields' => 'id', 'sp.pageSize' => 1]);
                 
-                $chartLabels = []; $chartData = [];
+                // [PERUBAHAN DISINI]: Filter diganti jadi EQUAL QUEUE
+                // Sebelumnya 'NOT_EQUAL CLOSED' menyebabkan SO yang sedang diproses (PROCEED)
+                // ikut terhitung sebagai "Belum Diproses". Sekarang hanya menghitung antrian murni.
+                $soRes = $this->accurate->get('sales-order/list.do', [
+                    'fields' => 'id', 
+                    'filter.status.op' => 'EQUAL', 
+                    'filter.status.val' => 'QUEUE', 
+                    'sp.pageSize' => 1
+                ]);
+
+                $doRes = $this->accurate->get('delivery-order/list.do', [
+                    'fields' => 'id', 
+                    'filter.transDate.op' => 'EQUAL', 
+                    'filter.transDate.val' => date('d/m/Y'), 
+                    'sp.pageSize' => 1
+                ]);
+
+                $itemRes = $this->accurate->get('item/list.do', [
+                    'fields' => 'id', 
+                    'sp.pageSize' => 1
+                ]);
+                
+                $chartLabels = []; 
+                $chartData = [];
                 for ($i = 6; $i >= 0; $i--) {
                     $d = now()->subDays($i);
                     $chartLabels[] = $d->format('d M');
-                    $r = $this->accurate->get('delivery-order/list.do', ['fields' => 'id', 'filter.transDate.op' => 'EQUAL', 'filter.transDate.val' => $d->format('d/m/Y'), 'sp.pageSize' => 1]);
+                    $r = $this->accurate->get('delivery-order/list.do', [
+                        'fields' => 'id', 
+                        'filter.transDate.op' => 'EQUAL', 
+                        'filter.transDate.val' => $d->format('d/m/Y'), 
+                        'sp.pageSize' => 1
+                    ]);
                     $chartData[] = $r['sp']['rowCount'] ?? 0;
                 }
-                return ['stats' => ['pending_so' => $soRes['sp']['rowCount'] ?? 0, 'today_do' => $doRes['sp']['rowCount'] ?? 0, 'total_items' => $itemRes['sp']['rowCount'] ?? 0], 'chartLabels' => $chartLabels, 'chartData' => $chartData];
+                
+                return [
+                    'stats' => [
+                        'pending_so' => $soRes['sp']['rowCount'] ?? 0, 
+                        'today_do' => $doRes['sp']['rowCount'] ?? 0, 
+                        'total_items' => $itemRes['sp']['rowCount'] ?? 0
+                    ], 
+                    'chartLabels' => $chartLabels, 
+                    'chartData' => $chartData
+                ];
             });
+            
             return view('warehouse.dashboard', $data + ['isConnected' => true]);
+
         } catch (\Exception $e) {
-            return view('warehouse.dashboard', ['stats' => ['pending_so' => 0, 'today_do' => 0, 'total_items' => 0], 'chartLabels' => [], 'chartData' => [], 'isConnected' => false]);
+            return view('warehouse.dashboard', [
+                'stats' => ['pending_so' => 0, 'today_do' => 0, 'total_items' => 0], 
+                'chartLabels' => [], 
+                'chartData' => [], 
+                'isConnected' => false
+            ]);
         }
     }
 
