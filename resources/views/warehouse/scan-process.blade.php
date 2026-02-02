@@ -25,19 +25,17 @@
             <div class="input-group input-group-lg">
                 <span class="input-group-text bg-white border-end-0"><i class="fa-solid fa-qrcode"></i></span>
                 <input type="text" class="form-control fw-bold border-start-0 fs-4" id="barcodeInput" 
-                       placeholder="Scan Barcode..." autofocus autocomplete="off" 
-                       onblur="this.focus()">
+                       placeholder="Scan Barcode..." autofocus autocomplete="off">
             </div>
             
             <div id="pesanFeedback" class="mt-2 fw-bold small p-2 rounded d-none"></div>
 
             <div class="alert alert-warning mt-3 mb-0 small border-start border-4 border-warning fst-italic">
-                <i class="fa-solid fa-lock"></i> <strong>Proteksi Stok:</strong><br>
-                Sistem akan memblokir scan jika melebihi stok gudang.
+                <i class="fa-solid fa-lock"></i> <strong>Sistem Terkunci:</strong><br>
+                Scan barang untuk membuka kunci input, lalu ketik jumlahnya.
             </div>
         </div>
 
-        {{-- UPDATE: Tombol dengan Loading State --}}
         <button type="button" class="btn btn-secondary w-100 py-3 fw-bold fs-5 shadow-sm" id="btnSelesai" disabled onclick="kirimKeAccurate()">
             <i class="fa-solid fa-paper-plane me-2"></i> PROSES KIRIM
         </button>
@@ -57,18 +55,22 @@
                         <th class="ps-4">Barang</th>
                         <th class="text-center">Target</th>
                         <th class="text-center bg-warning bg-opacity-10 text-dark border-start border-end">Stok Real</th> 
-                        <th class="text-center">Scan</th>
+                        <th class="text-center">Input Qty</th>
                         <th class="text-center">Status</th>
                     </tr>
                 </thead>
                 <tbody>
                     @foreach($so['detailItem'] as $item)
+                    @php
+                        $maxQty = min($item['quantity'], $item['stok_gudang'] ?? 0);
+                    @endphp
                     <tr id="row-{{ $item['item']['no'] }}" class="barang-row"
                         data-code="{{ $item['item']['no'] }}" 
                         data-barcode="{{ $item['barcode_asli'] ?? $item['item']['no'] }}" 
                         data-name="{{ $item['item']['name'] }}"
                         data-target="{{ $item['quantity'] }}"
-                        data-stock="{{ $item['stok_gudang'] ?? 0 }}"> 
+                        data-stock="{{ $item['stok_gudang'] ?? 0 }}"
+                        data-max="{{ $maxQty }}"> 
                         
                         <td class="ps-4">
                             <div class="fw-bold text-dark">{{ $item['item']['name'] }}</div>
@@ -90,8 +92,18 @@
                             {{ $item['stok_gudang'] ?? 0 }}
                         </td>
 
-                        <td class="text-center fw-bold fs-5 text-primary">
-                            <span id="qty-{{ $item['item']['no'] }}">0</span>
+                        {{-- Input Default: DISABLED (Terkunci & Abu-abu) --}}
+                        <td class="text-center">
+                            <input type="number" 
+                                   id="qty-{{ $item['item']['no'] }}" 
+                                   class="form-control text-center fw-bold border-primary shadow-sm mx-auto" 
+                                   style="width: 80px; font-size: 1.2rem; background-color: #e9ecef;"
+                                   value="0" 
+                                   min="0"
+                                   max="{{ $maxQty }}"
+                                   disabled 
+                                   onchange="manualUpdate('{{ $item['item']['no'] }}')"
+                                   onkeydown="checkInputEnter(event)">
                         </td>
                         
                         <td class="text-center">
@@ -123,6 +135,11 @@
     const feedbackEl = document.getElementById('pesanFeedback');
     const btnSelesai = document.getElementById('btnSelesai');
 
+    // Fokus ke Barcode saat awal load
+    window.onload = function() { 
+        if(inputEl) inputEl.focus(); 
+    }
+
     inputEl.addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
             e.preventDefault();
@@ -133,6 +150,7 @@
         }
     });
 
+    // LOGIC UTAMA
     function prosesScan(scannedValue) {
         let row = document.querySelector(`.barang-row[data-barcode="${scannedValue}"]`);
 
@@ -143,46 +161,110 @@
 
         let code = row.getAttribute('data-code');
         let name = row.getAttribute('data-name');
-        let target = parseInt(row.getAttribute('data-target')) || 0;
-        let stockReal = parseInt(row.getAttribute('data-stock')); 
+        let maxQty = parseInt(row.getAttribute('data-max')) || 0;
         
-        if (isNaN(stockReal)) stockReal = 0;
-        let current = itemCounts[code];
+        let inputQty = document.getElementById(`qty-${code}`);
+        let currentVal = parseInt(inputQty.value) || 0;
 
-        if ((current + 1) > stockReal) {
-            showError('STOK HABIS!', `Stok hanya <b>${stockReal}</b> pcs.`);
+        // KASUS 1: Masih Terkunci (Belum Inisialisasi)
+        if (inputQty.disabled) {
+            // 1. Buka Kunci
+            inputQty.disabled = false;
+            inputQty.style.backgroundColor = "#fff"; // Ubah jadi putih
+            
+            // 2. Set Angka Awal = 1
+            inputQty.value = 1;
+            itemCounts[code] = 1;
+            
+            updateUI(code, 1, maxQty);
+            
+            // 3. FOKUS & SELECT (Agar User Bisa Langsung Ketik Angka Lain)
+            // 'select()' akan memblok angka 1, jadi kalau user ketik '10', angka 1 hilang terganti 10.
+            setTimeout(() => {
+                inputQty.focus();
+                inputQty.select();
+            }, 50);
+
+            audioSuccess.play();
+            statusEl.className = "p-2 mb-2 rounded text-center fw-bold bg-success text-white";
+            statusEl.innerHTML = `TERBUKA: ${name}`;
+            tampilkanPesan('success', `🔓 <b>${name}</b> terbuka. Ketik jumlah lalu Enter.`);
+            return; 
+        }
+
+        // KASUS 2: Sudah Terbuka (Scan Lagi = +1 atau Fokus Ulang)
+        if (currentVal >= maxQty) {
+            showWarning('SUDAH LENGKAP', `Item <b>${name}</b> sudah penuh.`);
+            inputQty.focus();
+            inputQty.select();
             return;
         }
 
-        if (current >= target) {
-            showWarning('SUDAH LENGKAP', `Item <b>${name}</b> sudah terpenuhi.`);
-            return;
-        }
-
-        itemCounts[code]++;
-        updateUI(code, target, stockReal);
+        let newVal = currentVal + 1;
+        inputQty.value = newVal;
+        itemCounts[code] = newVal;
+        updateUI(code, newVal, maxQty);
         
         audioSuccess.play();
-        statusEl.className = "p-2 mb-2 rounded text-center fw-bold bg-success text-white";
-        statusEl.innerHTML = `SUKSES: ${name}`;
-        tampilkanPesan('success', `✅ <b>${name}</b> berhasil discan (+1)`);
+        
+        // Tetap arahkan fokus ke sini agar user sadar
+        inputQty.focus();
+        inputQty.select();
     }
 
-    function updateUI(code, target, stockReal) {
-        let current = itemCounts[code];
-        document.getElementById(`qty-${code}`).innerText = current;
+    // LOGIC: Validasi Input Manual
+    function manualUpdate(code) {
+        let row = document.getElementById(`row-${code}`);
+        let maxQty = parseInt(row.getAttribute('data-max')) || 0;
+        let inputQty = document.getElementById(`qty-${code}`);
+        
+        let val = parseInt(inputQty.value);
 
+        if (isNaN(val) || val < 0) val = 0;
+
+        // Cegah melebihi stok/pesanan
+        if (val > maxQty) {
+            audioLimit.play();
+            val = maxQty;
+            Swal.fire({
+                icon: 'warning',
+                title: 'Melebihi Batas',
+                text: `Maksimal: ${maxQty}`,
+                timer: 1500,
+                showConfirmButton: false
+            });
+        }
+
+        inputQty.value = val;
+        itemCounts[code] = val;
+        updateUI(code, val, maxQty);
+    }
+
+    // Helper: Enter di Input Angka -> Kembali ke Scan Barcode
+    function checkInputEnter(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            e.target.blur(); 
+            inputEl.focus(); // Kembali siap scan barang berikutnya
+        }
+    }
+
+    function updateUI(code, current, max) {
         let row = document.getElementById(`row-${code}`);
         let icon = document.getElementById(`icon-${code}`);
+        let target = parseInt(row.getAttribute('data-target'));
 
-        if (current === target) {
+        if (current >= target) {
             row.classList.add('table-success'); 
+            row.classList.remove('table-warning');
             icon.className = 'fa-solid fa-circle-check text-success fs-4';
-        } else if (current === stockReal) {
-            row.classList.add('table-warning'); 
-            icon.className = 'fa-solid fa-triangle-exclamation text-warning fs-4';
+        } else if (current > 0) {
+            row.classList.add('table-warning');
+            row.classList.remove('table-success'); 
+            icon.className = 'fa-solid fa-pen-to-square text-warning fs-4';
         } else {
             row.classList.remove('table-success', 'table-warning');
+            icon.className = 'fa-regular fa-circle text-muted fs-4';
         }
 
         cekTombolKirim();
@@ -198,6 +280,10 @@
             btnSelesai.disabled = false;
             btnSelesai.className = "btn btn-warning w-100 py-3 fw-bold fs-5 shadow-sm";
             btnSelesai.innerHTML = '<i class="fa-solid fa-truck-fast me-2"></i> PROSES KIRIM';
+        } else {
+            btnSelesai.disabled = true;
+            btnSelesai.className = "btn btn-secondary w-100 py-3 fw-bold fs-5 shadow-sm";
+            btnSelesai.innerHTML = '<i class="fa-solid fa-paper-plane me-2"></i> PROSES KIRIM';
         }
     }
 
@@ -206,6 +292,7 @@
         statusEl.className = "p-2 mb-2 rounded text-center fw-bold bg-danger text-white animate__animated animate__shakeX";
         statusEl.innerHTML = title;
         tampilkanPesan('error', `⛔ ${msg}`);
+        setTimeout(() => inputEl.focus(), 100);
     }
 
     function showWarning(title, msg) {
@@ -224,7 +311,6 @@
     function kirimKeAccurate() {
         if (inputEl) inputEl.blur();
 
-        // 1. Tampilkan Loading State di Tombol
         let originalBtnText = btnSelesai.innerHTML;
         btnSelesai.disabled = true;
         btnSelesai.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i> MENGIRIM...';
@@ -277,7 +363,6 @@
                     allowOutsideClick: false
                 }).then((result) => {
                     if (result.isConfirmed) {
-                        // FIX: Gunakan do_id yang dikirim dari controller
                         const urlPDF = `{{ url('/print-do') }}/${data.do_id}`;
                         window.open(urlPDF, '_blank');
                         setTimeout(() => { window.location.href = "{{ url('/scan-so') }}"; }, 2000); 
@@ -287,7 +372,6 @@
                 });
             } else {
                 Swal.fire('Gagal!', data.message, 'error');
-                // Balikin tombol jika gagal
                 btnSelesai.disabled = false;
                 btnSelesai.innerHTML = originalBtnText;
                 if(inputEl) inputEl.focus();
@@ -300,15 +384,10 @@
                 title: 'Gagal Kirim',
                 text: err.message
             });
-            // Balikin tombol jika error
             btnSelesai.disabled = false;
             btnSelesai.innerHTML = originalBtnText;
             if(inputEl) inputEl.focus();
         });
-    }
-
-    window.onload = function() { 
-        if(inputEl) inputEl.focus(); 
     }
 </script>
 @endsection
