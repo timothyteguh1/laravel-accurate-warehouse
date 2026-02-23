@@ -270,7 +270,7 @@ private function getShippedQtyBySO(string $soNumber, $soId = null): array
 
     return $shipped;
 }
-    // 4. SUBMIT DO — WAITING-aware split
+    // 4. SUBMIT DO — Murni 1 SO banyak DO (Tanpa Split)
     public function submitDOWithLocalLookup(Request $request)
     {
         $soNumber     = $request->so_number;
@@ -280,7 +280,7 @@ private function getShippedQtyBySO(string $soNumber, $soId = null): array
         Log::info("START SUBMIT DO: $soNumber", ['isWaiting' => $isWaiting, 'scanned' => $itemsScanned]);
 
         try {
-            // A. Cari SO
+            // A. Cari SO di Accurate
             $findSo = $this->accurate->get('sales-order/list.do', [
                 'filter.number.op'  => 'EQUAL',
                 'filter.number.val' => $soNumber,
@@ -292,24 +292,24 @@ private function getShippedQtyBySO(string $soNumber, $soId = null): array
             $soData      = $soDetailRes['d'] ?? null;
             if (!$soData) return response()->json(['success' => false, 'message' => 'Detail SO tidak bisa dimuat.']);
 
-            // B. Hitung shipped (WAITING only)
+            // B. Hitung shipped (Untuk perhitungan lanjutan sisa WAITING)
+            // Menggunakan fungsi getShippedQtyBySO presisi tinggi yang baru saja kita buat
             $shippedPerSku = $isWaiting ? $this->getShippedQtyBySO($soNumber, $soId) : [];
 
-            // C. Kalkulasi split
-            $itemsToShip    = [];
-            $itemsBackorder = [];
-            $needsSplit     = false;
+            // C. Kalkulasi barang yang akan dikirim di sesi DO ini
+            $itemsToShip = [];
+            $isPartial   = false; // Penanda apakah ini pengiriman sebagian
 
             foreach ($soData['detailItem'] as $line) {
                 $sku            = $line['item']['no'];
                 $qtyTotal       = $line['quantity'];
                 $alreadyShipped = $shippedPerSku[$sku] ?? 0;
-                $effectiveQty   = max(0, $qtyTotal - $alreadyShipped);
+                $effectiveQty   = max(0, $qtyTotal - $alreadyShipped); // Sisa target asli
 
-                // Skip item yang sudah fully shipped sebelumnya
+                // Skip jika item ini sudah beres dikirim di DO sebelumnya
                 if ($effectiveQty === 0) continue;
 
-                // Resolusi barcode → qty scan
+                // Cek hasil scan dari frontend
                 $qtyScan = 0;
                 $upc     = $line['item']['upcNo'] ?? null;
                 if ($upc && isset($itemsScanned[$upc])) {
@@ -319,6 +319,9 @@ private function getShippedQtyBySO(string $soNumber, $soId = null): array
                 }
 
                 if ($qtyScan > 0) {
+                    // Proteksi ganda: Jangan sampai kirim melebihi sisa target
+                    $qtyScan = min($qtyScan, $effectiveQty);
+
                     $itemsToShip[] = [
                         'lineId' => $line['id'],
                         'itemNo' => $sku,
@@ -327,25 +330,14 @@ private function getShippedQtyBySO(string $soNumber, $soId = null): array
                         'price'  => $line['unitPrice'],
                         'disc'   => $line['itemDiscPercent'] ?? 0,
                     ];
+
+                    // Jika yang discan kurang dari sisa target, berarti ini DO Parsial
                     if ($qtyScan < $effectiveQty) {
-                        $needsSplit       = true;
-                        $itemsBackorder[] = [
-                            'itemNo' => $sku,
-                            'qty'    => $effectiveQty - $qtyScan,
-                            'unit'   => is_array($line['itemUnit']) ? $line['itemUnit']['name'] : $line['itemUnit'],
-                            'price'  => $line['unitPrice'],
-                            'disc'   => $line['itemDiscPercent'] ?? 0,
-                        ];
+                        $isPartial = true;
                     }
                 } else {
-                    $needsSplit       = true;
-                    $itemsBackorder[] = [
-                        'itemNo' => $sku,
-                        'qty'    => $effectiveQty,
-                        'unit'   => is_array($line['itemUnit']) ? $line['itemUnit']['name'] : $line['itemUnit'],
-                        'price'  => $line['unitPrice'],
-                        'disc'   => $line['itemDiscPercent'] ?? 0,
-                    ];
+                    // Ada sisa target, tapi tidak ikut di-scan hari ini -> otomatis Parsial
+                    $isPartial = true;
                 }
             }
 
@@ -353,94 +345,34 @@ private function getShippedQtyBySO(string $soNumber, $soId = null): array
                 return response()->json(['success' => false, 'message' => 'Tidak ada barang valid untuk dikirim.']);
             }
 
-            // D. Split jika perlu
-            if ($needsSplit && count($itemsBackorder) > 0) {
-                // Buat SO Baru (sisa)
-                $newSOPayload = [
-                    'transDate'    => date('d/m/Y'),
-                    'customerNo'   => $soData['customer']['customerNo'],
-                    'description'  => 'Split (Sisa) dari ' . $soNumber . '. ' . ($soData['description'] ?? ''),
-                    'toAddress'    => $soData['toAddress']    ?? '',
-                    'taxable'      => $soData['taxable']      ?? false,
-                    'inclusiveTax' => $soData['inclusiveTax'] ?? false,
-                    'detailItem'   => [],
-                ];
-                foreach ($itemsBackorder as $bo) {
-                    $newSOPayload['detailItem'][] = [
-                        'itemNo'          => $bo['itemNo'],
-                        'quantity'        => $bo['qty'],
-                        'unitPrice'       => $bo['price'],
-                        'itemUnit'        => $bo['unit'],
-                        'itemDiscPercent' => $bo['disc'],
-                    ];
-                }
-                if (isset($soData['branch'])) $newSOPayload['branch'] = ['id' => $soData['branch']['id']];
+            // D. SPLIT SO DIHAPUS SEPENUHNYA! Kita biarkan Accurate yang mengatur status SO.
 
-                $resNew = $this->accurate->post('sales-order/save.do', $newSOPayload);
-                if (!isset($resNew['s']) || !$resNew['s']) {
-                    return response()->json(['success' => false, 'message' => 'Gagal membuat SO Sisa. DO dibatalkan.']);
-                }
-
-                // Update SO Lama
-                $updateSOPayload = [
-                    'id'          => $soId,
-                    'description' => ($soData['description'] ?? '') . ' (Sudah di-split)',
-                    'detailItem'  => [],
-                ];
-                foreach ($soData['detailItem'] as $originalLine) {
-                    $foundInShip = false;
-                    foreach ($itemsToShip as $shipItem) {
-                        if ($shipItem['lineId'] == $originalLine['id']) {
-                            $updateSOPayload['detailItem'][] = [
-                                'id'        => $originalLine['id'],
-                                'itemNo'    => $shipItem['itemNo'],
-                                'unitPrice' => $shipItem['price'],
-                                'quantity'  => $shipItem['qty'],
-                            ];
-                            $foundInShip = true;
-                            break;
-                        }
-                    }
-                    if (!$foundInShip) {
-                        $updateSOPayload['detailItem'][] = [
-                            'id'        => $originalLine['id'],
-                            'itemNo'    => $originalLine['item']['no'],
-                            'unitPrice' => $originalLine['unitPrice'],
-                            '_status'   => 'DELETE',
-                        ];
-                    }
-                }
-                $resUpdate = $this->accurate->post('sales-order/save.do', $updateSOPayload);
-                if (!isset($resUpdate['s']) || !$resUpdate['s']) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Gagal update SO Lama: ' . json_encode($resUpdate['d'] ?? ''),
-                    ]);
-                }
-            }
-
-            // E. Buat DO
+            // E. Langsung Buat DO
             $doPayload = [
                 'transDate'        => date('d/m/Y'),
                 'customerNo'       => $soData['customer']['customerNo'],
-                'description'      => 'DO Scan App: Mengirim ' . $soNumber,
+                // Tambahkan keterangan beda jika ini pengiriman sebagian
+                'description'      => 'DO Scan App: Mengirim ' . $soNumber . ($isPartial ? ' (Parsial)' : ''),
                 'salesOrderNumber' => $soNumber,
                 'toAddress'        => $soData['toAddress']    ?? '',
                 'taxable'          => $soData['taxable']      ?? false,
                 'inclusiveTax'     => $soData['inclusiveTax'] ?? false,
                 'detailItem'       => [],
             ];
+            
             foreach ($itemsToShip as $shipItem) {
                 $doPayload['detailItem'][] = [
                     'itemNo'             => $shipItem['itemNo'],
                     'quantity'           => $shipItem['qty'],
                     'itemUnit'           => $shipItem['unit'],
                     'salesOrderNumber'   => $soNumber,
-                    'salesOrderDetailId' => $shipItem['lineId'],
+                    // Ini kunci utamanya: Memberitahu Accurate bahwa DO ini melunasi baris SO yang mana
+                    'salesOrderDetailId' => $shipItem['lineId'], 
                 ];
             }
             if (isset($soData['branch'])) $doPayload['branch'] = ['id' => $soData['branch']['id']];
 
+            // Tembak API Accurate
             $res = $this->accurate->post('delivery-order/save.do', $doPayload);
 
             if (($res['s'] ?? false) === true) {
@@ -449,9 +381,9 @@ private function getShippedQtyBySO(string $soNumber, $soId = null): array
                     'success'   => true,
                     'do_id'     => $res['r']['id'],
                     'do_number' => $res['r']['number'],
-                    'message'   => $needsSplit
-                        ? 'DO Terbit! Sisa barang sudah dipisah ke SO Baru.'
-                        : 'DO Terbit! Pesanan Selesai.',
+                    'message'   => $isPartial
+                        ? 'DO Sebagian Terbit! SO akan berstatus WAITING di Accurate.'
+                        : 'DO Terbit! Pesanan Selesai (Fully Shipped).',
                 ]);
             }
 
@@ -610,6 +542,107 @@ public function checkSoDoLink($soNumber)
         'so' => $so,
         'dos' => $connectedDos
     ]);
+}
+// 8. AMBIL LIST DO UNTUK POP-UP SURAT JALAN
+    public function getDoListBySo($soNumber)
+{
+    try {
+        // A. Ambil SO ID dulu
+        $soReq = $this->accurate->get('sales-order/list.do', [
+            'fields'            => 'id',
+            'filter.number.op'  => 'EQUAL',
+            'filter.number.val' => $soNumber
+        ]);
+        $soId = $soReq['d'][0]['id'] ?? null;
+
+        if (!$soId) {
+            return response()->json(['success' => false, 'message' => 'Data SO tidak ditemukan.']);
+        }
+
+        // B. Tarik DO pakai filter salesOrderId
+        $doRes = $this->accurate->get('delivery-order/list.do', [
+            'fields'                  => 'id,number,transDate,salesOrderId,salesOrder,detailItem',
+            'filter.salesOrderId.op'  => 'EQUAL',
+            'filter.salesOrderId.val' => $soId,
+            'sp.pageSize'             => 50,
+            'sort'                    => 'transDate asc'
+        ]);
+        $dos = $doRes['d'] ?? [];
+
+        // C. Fallback jika filter salesOrderId kosong
+        if (empty($dos)) {
+            $doResFallback = $this->accurate->get('delivery-order/list.do', [
+                'fields'         => 'id,number,transDate,salesOrderId,salesOrder,detailItem',
+                'filter.keyword' => $soNumber,
+                'sp.pageSize'    => 50,
+                'sort'           => 'transDate asc'
+            ]);
+            $dos = $doResFallback['d'] ?? [];
+        }
+
+        if (!is_array($dos)) $dos = [];
+
+        // D. VALIDASI KETAT — sama seperti getShippedQtyBySO
+        $validDos = [];
+
+        foreach ($dos as $do) {
+            if (!isset($do['id'])) continue;
+
+            // Cek header DO dulu
+            $headerSoId  = $do['salesOrderId'] ?? $do['salesOrder']['id'] ?? null;
+            $headerSoNum = $do['salesOrder']['number'] ?? $do['salesOrderNumber'] ?? null;
+
+            if (($headerSoId && $headerSoId == $soId) || ($headerSoNum === $soNumber)) {
+                $validDos[] = [
+                    'id'        => $do['id'],
+                    'number'    => $do['number'],
+                    'transDate' => $do['transDate'],
+                ];
+                continue;
+            }
+
+            // Jika header tidak cocok, cek ke detail baris barang
+            $doItems = $do['detailItem'] ?? null;
+
+            if (empty($doItems)) {
+                try {
+                    $detail  = $this->accurate->get('delivery-order/detail.do', ['id' => $do['id']]);
+                    $doItems = $detail['d']['detailItem'] ?? [];
+                } catch (\Exception $e) {
+                    Log::warning("getDoListBySo: Gagal fetch detail DO id={$do['id']}");
+                    continue;
+                }
+            }
+
+            $isLinked = false;
+            foreach ($doItems as $item) {
+                $itemSoId  = $item['salesOrderId'] ?? $item['salesOrder']['id'] ?? null;
+                $itemSoNum = $item['salesOrder']['number'] ?? $item['salesOrderNumber'] ?? null;
+
+                if (($itemSoId && $itemSoId == $soId) || ($itemSoNum === $soNumber)) {
+                    $isLinked = true;
+                    break;
+                }
+            }
+
+            if ($isLinked) {
+                $validDos[] = [
+                    'id'        => $do['id'],
+                    'number'    => $do['number'],
+                    'transDate' => $do['transDate'],
+                ];
+            }
+        }
+
+        if (empty($validDos)) {
+            return response()->json(['success' => false, 'message' => 'Belum ada Surat Jalan (DO) yang terbit untuk SO ini.']);
+        }
+
+        return response()->json(['success' => true, 'data' => $validDos]);
+
+    } catch (\Exception $e) {
+        return response()->json(['success' => false, 'message' => 'Server Error: ' . $e->getMessage()]);
+    }
 }
 
 }

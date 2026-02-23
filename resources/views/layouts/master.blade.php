@@ -198,7 +198,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
         // 1. Saat Halaman Selesai Loading -> Sembunyikan Loader
         window.addEventListener("load", function () {
@@ -243,6 +243,52 @@
                 });
             });
         });
+
+      function showDOList(soNumber) {
+            Swal.fire({
+                title: 'Mencari Surat Jalan...',
+                text: 'Mohon tunggu sebentar',
+                allowOutsideClick: false,
+                didOpen: () => { Swal.showLoading(); }
+            });
+
+            fetch(`/get-dos-by-so/${soNumber}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.success) {
+                        Swal.fire('Informasi', data.message, 'info');
+                        return;
+                    }
+
+                    let dos = data.data;
+                    let html = '<div class="list-group text-start mt-3 shadow-sm">';
+                    dos.forEach((doItem) => {
+                        html += `
+                            <a href="/print-do/${doItem.id}" target="_blank" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center p-3">
+                                <div>
+                                    <strong class="text-primary fs-6"><i class="fa-solid fa-file-lines me-2"></i>${doItem.number}</strong><br>
+                                    <small class="text-muted"><i class="fa-regular fa-calendar me-1"></i> Tgl Kirim: ${doItem.transDate}</small>
+                                </div>
+                                <span class="btn btn-sm btn-outline-primary rounded-pill fw-bold px-3">
+                                    <i class="fa-solid fa-print me-1"></i> Cetak
+                                </span>
+                            </a>
+                        `;
+                    });
+                    html += '</div>';
+
+                    Swal.fire({
+                        title: `Daftar Surat Jalan<br><span class="badge bg-secondary fs-6 mt-2">${soNumber}</span>`,
+                        html: html,
+                        showConfirmButton: false,
+                        showCloseButton: true,
+                        width: '600px'
+                    });
+                })
+                .catch(err => {
+                    Swal.fire('Error', 'Gagal terhubung ke server', 'error');
+                });
+        }
     </script>
 </body>
 

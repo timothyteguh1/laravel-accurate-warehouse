@@ -1,11 +1,17 @@
 @forelse($orders as $so)
 @if(is_array($so))
 <tr>
-    <td class="px-4">{{ $so['transDate'] ?? '-' }}</td>
-    <td class="px-4"><span class="badge bg-secondary">{{ $so['number'] ?? '-' }}</span></td>
-    <td class="px-4">{{ $so['customer']['name'] ?? 'Umum' }}</td>
+    <td class="px-4 py-3">{{ $so['transDate'] ?? '-' }}</td>
     
-    <td class="px-4">
+    <td class="px-4 py-3">
+        <span class="badge bg-secondary">{{ $so['number'] ?? '-' }}</span>
+    </td>
+    
+    <td class="px-4 py-3">
+        {{ $so['customer']['name'] ?? 'Umum' }}
+    </td>
+    
+    <td class="px-4 py-3">
         @php $st = strtoupper($so['status'] ?? ''); @endphp
         
         @if($st == 'CLOSED')
@@ -17,13 +23,19 @@
         @endif
     </td>
     
-    <td class="px-4 text-end">
-        <a href="{{ url('/find-do-print/' . ($so['number'] ?? '')) }}" target="_blank" class="btn btn-sm btn-outline-dark">
-            <i class="fa-solid fa-print"></i> Lihat Surat Jalan
-        </a>
+    <td class="px-4 py-3 text-end">
+        {{-- TOMBOL BARU: Memanggil Pop-up showDOList --}}
+        <button type="button" class="btn btn-dark btn-sm fw-bold shadow-sm" onclick="showDOList('{{ $so['number'] ?? '' }}')">
+            <i class="fa-solid fa-print me-1"></i> Lihat Surat Jalan
+        </button>
     </td>
 </tr>
 @endif
 @empty
-<tr><td colspan="5" class="text-center">Belum ada riwayat.</td></tr>
+<tr>
+    <td colspan="5" class="text-center text-muted py-5">
+        <i class="fa-solid fa-folder-open fs-2 mb-3 d-block text-secondary opacity-50"></i>
+        Belum ada riwayat pesanan yang sudah diproses atau lunas.
+    </td>
+</tr>
 @endforelse
