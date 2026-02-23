@@ -7,6 +7,8 @@ use App\Services\AccurateService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
+use App\Models\Driver;
+use App\Models\Delivery;
 
 class WarehouseController extends Controller
 {
@@ -166,9 +168,12 @@ class WarehouseController extends Controller
         }
         unset($item);
 
+        $drivers = Driver::all(); // Tarik semua data sopir dari database lokal
+
         return view('warehouse.scan-process', [
             'so'        => $so,
             'isWaiting' => $isWaiting,
+            'drivers'   => $drivers, // <--- Variabel ini dilempar ke Blade
         ]);
     }
 
@@ -644,5 +649,33 @@ public function checkSoDoLink($soNumber)
         return response()->json(['success' => false, 'message' => 'Server Error: ' . $e->getMessage()]);
     }
 }
+// 9. ASSIGN DRIVER (LOGISTIK)
+    public function assignDriver(Request $request)
+    {
+        try {
+            Delivery::create([
+                'accurate_do_id'     => $request->do_id,
+                'accurate_do_number' => $request->do_number,
+                'driver_id'          => $request->driver_id,
+                'status'             => 'Di Perjalanan' // Otomatis diset jalan
+            ]);
+
+            return response()->json(['success' => true, 'message' => 'Sopir berhasil ditugaskan!']);
+        } catch (\Exception $e) {
+            Log::error('ASSIGN DRIVER ERROR: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => 'Gagal assign sopir: ' . $e->getMessage()]);
+        }
+    }
+    // 10. MONITORING SOPIR & ARMADA
+    public function driverMonitor()
+    {
+        // Tarik semua data sopir beserta riwayat pengirimannya dari database lokal
+        // Urutkan pengiriman dari yang paling baru
+        $drivers = Driver::with(['deliveries' => function($query) {
+            $query->orderBy('created_at', 'desc');
+        }])->get();
+
+        return view('warehouse.drivers', compact('drivers'));
+    }
 
 }

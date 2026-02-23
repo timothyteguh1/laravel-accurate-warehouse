@@ -51,6 +51,10 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/debug/so-do-link/{soNumber}', [App\Http\Controllers\WarehouseController::class, 'checkSoDoLink']);
     Route::get('/get-dos-by-so/{soNumber}', [WarehouseController::class, 'getDoListBySo']);
+    // Assign Driver (Logistik)
+    Route::post('/assign-driver', [WarehouseController::class, 'assignDriver']);
+    // Monitor Sopir & Armada
+    Route::get('/drivers', [WarehouseController::class, 'driverMonitor']);
 
     // DIHAPUS: Route::get('/waiting-so/{id}', ...) — tidak diperlukan lagi
     // WAITING SO sekarang langsung masuk /scan-process/{id} — controller detect status WAITING otomatis

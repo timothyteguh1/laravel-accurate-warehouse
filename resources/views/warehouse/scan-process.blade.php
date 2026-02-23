@@ -226,6 +226,7 @@
     const soNumber  = "{{ $so['number'] }}";
     const soId      = "{{ $so['id'] }}";
     const isWaiting = {{ $isWaiting ? 'true' : 'false' }};
+    const drivers = @json($drivers);
 
     // itemCounts: qty BARU yang discan sesi ini (tidak termasuk qty yang sudah shipped sebelumnya)
     let itemCounts = {};
@@ -409,6 +410,7 @@
     }
 
     // ── Submit ke Accurate ──
+    // ── Submit ke Accurate ──
     function kirimKeAccurate() {
         if (inputEl) inputEl.blur();
 
@@ -423,6 +425,7 @@
             didOpen: () => { Swal.showLoading(); }
         });
 
+        // Tembak Data ke Endpoint Pembuat DO
         fetch('{{ url("/scan-process/submit") }}', {
             method: 'POST',
             headers: {
@@ -434,7 +437,7 @@
                 so_id:      soId,
                 so_number:  soNumber,
                 items:      itemCounts,
-                is_waiting: isWaiting   // ← flag penting untuk server-side logic
+                is_waiting: isWaiting
             })
         })
         .then(async res => {
@@ -445,32 +448,81 @@
             return res.json();
         })
         .then(data => {
+            // INI DIA BLOK SUKSESNYA! Berada di dalam respon fetch
             if (data.success) {
+                // 1. Buat elemen Dropdown Sopir
+                let driverOptions = '<select id="driverSelect" class="form-select form-select-lg mt-3 border-primary shadow-sm">';
+                driverOptions += '<option value="">-- Pilih Armada / Sopir --</option>';
+                drivers.forEach(d => {
+                    driverOptions += `<option value="${d.id}">${d.name} (${d.license_plate})</option>`;
+                });
+                driverOptions += '</select>';
+
+                // 2. Munculkan Pop-up Pilihan Sopir
                 Swal.fire({
                     icon: 'success',
                     title: 'DO Berhasil Dibuat!',
                     html: `
-                        <div class="text-start bg-light p-3 rounded small">
-                            <strong>No DO:</strong> ${data.do_number}<br>
-                            <strong>Status:</strong> Terkirim ke Accurate<br>
-                            <br>${data.message}
+                        <div class="text-start bg-light p-3 rounded small mb-3 border">
+                            <strong>No DO:</strong> <span class="text-primary">${data.do_number}</span><br>
+                            <span class="text-muted">${data.message}</span>
+                        </div>
+                        <div class="text-start">
+                            <strong class="text-dark"><i class="fa-solid fa-truck-fast me-1"></i> Tugaskan Pengiriman:</strong>
+                            ${driverOptions}
                         </div>
                     `,
-                    showCancelButton:     true,
-                    confirmButtonText:    '📥 Cetak Surat Jalan',
-                    cancelButtonText:     'Kembali ke List',
-                    confirmButtonColor:   '#0d6efd',
-                    cancelButtonColor:    '#6c757d',
-                    allowOutsideClick:    false
-                }).then(result => {
+                    showCancelButton: true,
+                    confirmButtonText: 'Tugaskan & Cetak Surat Jalan',
+                    cancelButtonText: 'Lewati (Tanpa Sopir)',
+                    confirmButtonColor: '#0d6efd',
+                    cancelButtonColor: '#6c757d',
+                    allowOutsideClick: false,
+                    preConfirm: () => {
+                        const driverId = document.getElementById('driverSelect').value;
+                        if (!driverId) {
+                            Swal.showValidationMessage('Pilih sopir dulu, atau klik Lewati!');
+                        }
+                        return driverId;
+                    }
+                }).then((result) => {
                     if (result.isConfirmed) {
+                        const driverId = result.value;
+                        
+                        Swal.fire({ title: 'Menugaskan Sopir...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+
+                        // 3. Tembak data ke database lokal
+                        fetch('{{ url("/assign-driver") }}', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                            },
+                            body: JSON.stringify({
+                                do_id: data.do_id,
+                                do_number: data.do_number,
+                                driver_id: driverId
+                            })
+                        })
+                        .then(r => r.json())
+                        .then(resAssign => {
+                            if(resAssign.success) {
+                                // 4. Buka tab cetak DO lalu kembali ke list antrian
+                                window.open(`{{ url('/print-do') }}/${data.do_id}`, '_blank');
+                                setTimeout(() => { window.location.href = "{{ url('/scan-so') }}"; }, 1500);
+                            } else {
+                                Swal.fire('Error', resAssign.message, 'error');
+                            }
+                        });
+
+                    } else if (result.dismiss === Swal.DismissReason.cancel) {
+                        // Jika klik "Lewati", tetap cetak DO tapi tanpa assign sopir
                         window.open(`{{ url('/print-do') }}/${data.do_id}`, '_blank');
-                        setTimeout(() => { window.location.href = "{{ url('/scan-so') }}"; }, 2000);
-                    } else {
-                        window.location.href = "{{ url('/scan-so') }}";
+                        setTimeout(() => { window.location.href = "{{ url('/scan-so') }}"; }, 1500);
                     }
                 });
             } else {
+                // Jika Accurate menolak pembuatan DO
                 Swal.fire('Gagal!', data.message, 'error');
                 btnSelesai.disabled  = false;
                 btnSelesai.innerHTML = originalBtnText;

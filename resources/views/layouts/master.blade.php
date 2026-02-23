@@ -158,6 +158,9 @@
             <a href="{{ url('/inventory') }}" class="nav-link {{ Request::is('inventory*') ? 'active' : '' }}">
                 <i class="fa-solid fa-boxes-stacked"></i> Inventory
             </a>
+            <a href="{{ url('/drivers') }}" class="nav-link {{ Request::is('drivers*') ? 'active' : '' }}">
+                <i class="fa-solid fa-truck"></i> Armada / Sopir
+            </a>
         </nav>
     </div>
 
