@@ -13,7 +13,11 @@ class Delivery extends Model
         'accurate_do_id', 
         'accurate_do_number', 
         'driver_id', 
-        'status'
+        'status',
+        // ─── TAMBAHAN ALLOW INSERT ───
+        'alamat_tujuan',
+        'latitude',
+        'longitude'
     ];
 
     // Relasi: 1 Pengiriman (DO) dibawa oleh 1 Sopir

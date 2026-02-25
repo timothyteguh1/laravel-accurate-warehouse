@@ -649,7 +649,7 @@ public function checkSoDoLink($soNumber)
         return response()->json(['success' => false, 'message' => 'Server Error: ' . $e->getMessage()]);
     }
 }
-// 9. ASSIGN DRIVER (LOGISTIK)
+   // 9. ASSIGN DRIVER (LOGISTIK)
     public function assignDriver(Request $request)
     {
         try {
@@ -657,7 +657,12 @@ public function checkSoDoLink($soNumber)
                 'accurate_do_id'     => $request->do_id,
                 'accurate_do_number' => $request->do_number,
                 'driver_id'          => $request->driver_id,
-                'status'             => 'Di Perjalanan' // Otomatis diset jalan
+                'status'             => 'Di Perjalanan', // Otomatis diset jalan
+                
+                // ─── TAMBAHAN TANGKAP DATA DARI FRONTEND ───
+                'alamat_tujuan'      => $request->alamat_tujuan,
+                'latitude'           => $request->latitude,
+                'longitude'          => $request->longitude,
             ]);
 
             return response()->json(['success' => true, 'message' => 'Sopir berhasil ditugaskan!']);
@@ -697,5 +702,22 @@ public function checkSoDoLink($soNumber)
         }])->get();
 
         return view('warehouse.drivers', compact('drivers'));
+    }
+    // 11. UPDATE ALAMAT PENGIRIMAN
+    public function updateAlamat(Request $request)
+    {
+        try {
+            $delivery = Delivery::findOrFail($request->delivery_id);
+            $delivery->update([
+                'alamat_tujuan' => $request->alamat_tujuan,
+                'latitude'      => $request->latitude,
+                'longitude'     => $request->longitude,
+            ]);
+
+            return response()->json(['success' => true, 'message' => 'Alamat berhasil diperbarui!']);
+        } catch (\Exception $e) {
+            Log::error('UPDATE ALAMAT ERROR: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => 'Gagal mengupdate alamat: ' . $e->getMessage()]);
+        }
     }
 }

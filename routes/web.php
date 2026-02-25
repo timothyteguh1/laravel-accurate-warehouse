@@ -55,6 +55,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/assign-driver', [WarehouseController::class, 'assignDriver']);
     // Monitor Sopir & Armada
     Route::get('/drivers', [WarehouseController::class, 'driverMonitor']);
+    Route::post('/delivery/update-alamat', [App\Http\Controllers\WarehouseController::class, 'updateAlamat']);
 
     // DIHAPUS: Route::get('/waiting-so/{id}', ...) — tidak diperlukan lagi
     // WAITING SO sekarang langsung masuk /scan-process/{id} — controller detect status WAITING otomatis

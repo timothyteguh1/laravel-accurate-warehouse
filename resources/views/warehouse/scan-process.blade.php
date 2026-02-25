@@ -410,7 +410,6 @@
     }
 
     // ── Submit ke Accurate ──
-    // ── Submit ke Accurate ──
     function kirimKeAccurate() {
         if (inputEl) inputEl.blur();
 
@@ -448,17 +447,16 @@
             return res.json();
         })
         .then(data => {
-            // INI DIA BLOK SUKSESNYA! Berada di dalam respon fetch
             if (data.success) {
                 // 1. Buat elemen Dropdown Sopir
-                let driverOptions = '<select id="driverSelect" class="form-select form-select-lg mt-3 border-primary shadow-sm">';
+                let driverOptions = '<select id="driverSelect" class="form-select form-select-lg border-primary shadow-sm mt-1">';
                 driverOptions += '<option value="">-- Pilih Armada / Sopir --</option>';
                 drivers.forEach(d => {
                     driverOptions += `<option value="${d.id}">${d.name} (${d.license_plate})</option>`;
                 });
                 driverOptions += '</select>';
 
-                // 2. Munculkan Pop-up Pilihan Sopir
+                // 2. Munculkan Pop-up Pilihan Sopir & Alamat
                 Swal.fire({
                     icon: 'success',
                     title: 'DO Berhasil Dibuat!',
@@ -467,8 +465,17 @@
                             <strong>No DO:</strong> <span class="text-primary">${data.do_number}</span><br>
                             <span class="text-muted">${data.message}</span>
                         </div>
+                        
+                        <div class="text-start mb-3" style="position: relative;">
+                            <label class="fw-bold mb-1 text-dark"><i class="fa-solid fa-map-location-dot me-1"></i> Alamat Tujuan:</label>
+                            <input type="text" id="search_alamat" class="form-control form-control-lg" placeholder="Ketik nama jalan / daerah..." autocomplete="off">
+                            <ul id="hasil_pencarian" class="dropdown-menu w-100 shadow-lg" style="display: none; position: absolute; max-height: 200px; overflow-y: auto; z-index: 9999; margin-top: 2px;"></ul>
+                            <input type="hidden" id="latitude">
+                            <input type="hidden" id="longitude">
+                        </div>
+
                         <div class="text-start">
-                            <strong class="text-dark"><i class="fa-solid fa-truck-fast me-1"></i> Tugaskan Pengiriman:</strong>
+                            <label class="fw-bold mb-1 text-dark"><i class="fa-solid fa-truck-fast me-1"></i> Tugaskan Pengiriman:</label>
                             ${driverOptions}
                         </div>
                     `,
@@ -478,20 +485,82 @@
                     confirmButtonColor: '#0d6efd',
                     cancelButtonColor: '#6c757d',
                     allowOutsideClick: false,
+                    
+                    // TAMBAHAN: TAHAP 2 (Script Geocoding saat Modal Terbuka)
+                    didOpen: () => {
+                        const inputAlamat = Swal.getPopup().querySelector('#search_alamat');
+                        const listHasil = Swal.getPopup().querySelector('#hasil_pencarian');
+                        const inputLat = Swal.getPopup().querySelector('#latitude');
+                        const inputLng = Swal.getPopup().querySelector('#longitude');
+                        let timeoutId;
+
+                        inputAlamat.addEventListener('input', function() {
+                            const query = this.value;
+                            if (query.length < 3) {
+                                listHasil.style.display = 'none';
+                                return;
+                            }
+
+                            clearTimeout(timeoutId);
+                            timeoutId = setTimeout(() => {
+                                fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&countrycodes=id&limit=5`)
+                                    .then(res => res.json())
+                                    .then(hasil => {
+                                        listHasil.innerHTML = ''; 
+                                        if (hasil.length > 0) {
+                                            listHasil.style.display = 'block';
+                                            hasil.forEach(item => {
+                                                const li = document.createElement('li');
+                                                li.className = 'dropdown-item text-wrap border-bottom';
+                                                li.style.cursor = 'pointer';
+                                                li.style.fontSize = '0.85rem';
+                                                li.textContent = item.display_name;
+                                                
+                                                li.addEventListener('click', function() {
+                                                    inputAlamat.value = item.display_name;
+                                                    inputLat.value = item.lat;
+                                                    inputLng.value = item.lon;
+                                                    listHasil.style.display = 'none';
+                                                });
+
+                                                listHasil.appendChild(li);
+                                            });
+                                        } else {
+                                            listHasil.style.display = 'none';
+                                        }
+                                    });
+                            }, 500);
+                        });
+
+                        // Tutup dropdown jika klik di luar
+                        document.addEventListener('click', function(e) {
+                            if (e.target !== inputAlamat && e.target !== listHasil) {
+                                listHasil.style.display = 'none';
+                            }
+                        });
+                    },
+
                     preConfirm: () => {
                         const driverId = document.getElementById('driverSelect').value;
+                        const alamat = document.getElementById('search_alamat').value;
+                        const lat = document.getElementById('latitude').value;
+                        const lng = document.getElementById('longitude').value;
+                        
                         if (!driverId) {
                             Swal.showValidationMessage('Pilih sopir dulu, atau klik Lewati!');
+                            return false;
                         }
-                        return driverId;
+
+                        // Mengembalikan data sebagai object
+                        return { driver_id: driverId, alamat_tujuan: alamat, lat: lat, lng: lng };
                     }
                 }).then((result) => {
                     if (result.isConfirmed) {
-                        const driverId = result.value;
+                        const dataInput = result.value;
                         
                         Swal.fire({ title: 'Menugaskan Sopir...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
 
-                        // 3. Tembak data ke database lokal
+                        // 3. Tembak data ke database lokal (Sudah menyertakan alamat & kordinat)
                         fetch('{{ url("/assign-driver") }}', {
                             method: 'POST',
                             headers: {
@@ -501,13 +570,15 @@
                             body: JSON.stringify({
                                 do_id: data.do_id,
                                 do_number: data.do_number,
-                                driver_id: driverId
+                                driver_id: dataInput.driver_id,
+                                alamat_tujuan: dataInput.alamat_tujuan,
+                                latitude: dataInput.lat,
+                                longitude: dataInput.lng
                             })
                         })
                         .then(r => r.json())
                         .then(resAssign => {
                             if(resAssign.success) {
-                                // 4. Buka tab cetak DO lalu kembali ke list antrian
                                 window.open(`{{ url('/print-do') }}/${data.do_id}`, '_blank');
                                 setTimeout(() => { window.location.href = "{{ url('/scan-so') }}"; }, 1500);
                             } else {
