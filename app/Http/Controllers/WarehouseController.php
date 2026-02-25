@@ -667,15 +667,35 @@ public function checkSoDoLink($soNumber)
         }
     }
     // 10. MONITORING SOPIR & ARMADA
+ // 10. MONITORING SOPIR & ARMADA (Dengan Auto-Sync)
     public function driverMonitor()
     {
-        // Tarik semua data sopir beserta riwayat pengirimannya dari database lokal
-        // Urutkan pengiriman dari yang paling baru
+        // ─── 1. PROSES SINKRONISASI OTOMATIS ───
+        // Ambil semua pengiriman lokal yang masih aktif (Belum Selesai)
+        $activeDeliveries = Delivery::all();
+
+        foreach ($activeDeliveries as $deliv) {
+            try {
+                // Cek ke Accurate apakah ID DO ini masih eksis
+                $cekAccurate = $this->accurate->get('delivery-order/detail.do', ['id' => $deliv->accurate_do_id]);
+                
+                // Jika Accurate mengembalikan status false (berarti ID tidak ditemukan / sudah dihapus di Accurate)
+                if (isset($cekAccurate['s']) && $cekAccurate['s'] === false) {
+                    // Hapus data "hantu" ini dari database lokal kita
+                    $deliv->delete();
+                }
+            } catch (\Exception $e) {
+                // Jika error karena masalah koneksi internet/timeout, abaikan (jangan dihapus)
+                Log::warning("Sync Check Error untuk DO {$deliv->accurate_do_number}: " . $e->getMessage());
+            }
+        }
+        // ────────────────────────────────────────
+
+        // ─── 2. TARIK DATA UNTUK TAMPILAN ───
         $drivers = Driver::with(['deliveries' => function($query) {
             $query->orderBy('created_at', 'desc');
         }])->get();
 
         return view('warehouse.drivers', compact('drivers'));
     }
-
 }
