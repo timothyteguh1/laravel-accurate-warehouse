@@ -7,6 +7,7 @@ use App\Http\Controllers\WarehouseController;
 use App\Http\Controllers\SalesOrderController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\SalesOrderStatusController;
+use App\Http\Controllers\OrinController;
 
 // === 1. GUEST AREA ===
 Route::middleware('guest')->group(function () {
@@ -56,6 +57,27 @@ Route::middleware('auth')->group(function () {
     // Monitor Sopir & Armada
     Route::get('/drivers', [WarehouseController::class, 'driverMonitor']);
     Route::post('/delivery/update-alamat', [App\Http\Controllers\WarehouseController::class, 'updateAlamat']);
+
+    // Route Internal untuk jembatan Live Tracking ORIN
+    Route::get('/api/track-driver/{nopol}', [\App\Http\Controllers\WarehouseController::class, 'getOrinLocation']);
+
+    // ORIN Fleet Monitoring
+    Route::prefix('orin')->name('orin.')->group(function () {
+        // [Tambahkan route debug disini]
+        Route::get('/debug/test', [OrinController::class, 'testConnection'])->name('test.connection');
+
+        Route::get('/',                          [OrinController::class, 'index'])->name('index');
+        Route::get('/device/{vehicleId}',        [OrinController::class, 'show'])->name('device');
+        Route::get('/',                           [OrinController::class, 'index'])->name('index');
+        Route::get('/device/{vehicleId}',         [OrinController::class, 'show'])->name('device');
+        Route::get('/device/{vehicleId}/history', [OrinController::class, 'historyRoutes'])->name('history');
+        Route::get('/alerts',                     [OrinController::class, 'alerts'])->name('alerts');
+
+        // JSON API endpoints (peta live, dll)
+        Route::get('/api/devices',                [OrinController::class, 'apiDevices']);
+        Route::get('/api/raw/{vehicleId}',        [OrinController::class, 'apiRawData']);
+        Route::post('/api/available',             [OrinController::class, 'apiUpdateAvailable']);
+    });
 
     // DIHAPUS: Route::get('/waiting-so/{id}', ...) — tidak diperlukan lagi
     // WAITING SO sekarang langsung masuk /scan-process/{id} — controller detect status WAITING otomatis

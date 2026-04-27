@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Warehouse Pro</title>
-    
+
     {{-- CSS Lokal (Pastikan file ini ada sesuai rencana optimasi sebelumnya) --}}
     {{-- Jika belum ada, ganti asset(...) dengan link CDN Bootstrap --}}
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -82,7 +82,7 @@
             padding: 20px;
             box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
         }
-        
+
         .user-dropdown-toggle {
             cursor: pointer;
         }
@@ -97,7 +97,8 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(255, 255, 255, 0.9); /* Background putih semi-transparan */
+            background-color: rgba(255, 255, 255, 0.9);
+            /* Background putih semi-transparan */
             display: flex;
             justify-content: center;
             align-items: center;
@@ -108,15 +109,22 @@
         .spinner {
             width: 50px;
             height: 50px;
-            border: 5px solid #e5e7eb; /* Warna abu muda */
-            border-top: 5px solid #2563EB; /* Warna Biru Utama */
+            border: 5px solid #e5e7eb;
+            /* Warna abu muda */
+            border-top: 5px solid #2563EB;
+            /* Warna Biru Utama */
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
 
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
         }
 
         /* Class untuk menyembunyikan loader */
@@ -161,29 +169,39 @@
             <a href="{{ url('/drivers') }}" class="nav-link {{ Request::is('drivers*') ? 'active' : '' }}">
                 <i class="fa-solid fa-truck"></i> Armada / Sopir
             </a>
+            <a href="{{ url('/orin') }}" class="nav-link {{ Request::is('orin*') ? 'active' : '' }}">
+                <i class="fa-solid fa-satellite-dish"></i> ORIN Fleet
+            </a>
         </nav>
     </div>
 
     <div class="main">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h1 class="header-title">@yield('header')</h1>
-            
+
             <div class="dropdown">
-                <div class="d-flex align-items-center gap-3 user-dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                <div class="d-flex align-items-center gap-3 user-dropdown-toggle" data-bs-toggle="dropdown"
+                    aria-expanded="false">
                     <div class="text-end d-none d-md-block">
-                        <div class="fw-bold text-dark" style="font-size: 14px;">{{ Auth::user()->name ?? 'Staff Gudang' }}</div>
-                        <div class="text-muted" style="font-size: 12px;">{{ Auth::user()->email ?? 'staff@warehouse.com' }}</div>
+                        <div class="fw-bold text-dark" style="font-size: 14px;">
+                            {{ Auth::user()->name ?? 'Staff Gudang' }}</div>
+                        <div class="text-muted" style="font-size: 12px;">
+                            {{ Auth::user()->email ?? 'staff@warehouse.com' }}</div>
                     </div>
                     <div class="bg-dark text-white rounded-circle d-flex justify-content-center align-items-center"
                         style="width: 40px; height: 40px;">
                         <i class="fa-solid fa-user"></i>
                     </div>
                 </div>
-                
+
                 <ul class="dropdown-menu dropdown-menu-end border-0 shadow mt-2">
-                    <li><h6 class="dropdown-header">Akun</h6></li>
+                    <li>
+                        <h6 class="dropdown-header">Akun</h6>
+                    </li>
                     <li><a class="dropdown-item" href="#"><i class="fa-solid fa-gear me-2"></i> Settings</a></li>
-                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                        <hr class="dropdown-divider">
+                    </li>
                     <li>
                         <form action="{{ route('logout') }}" method="POST">
                             @csrf
@@ -194,7 +212,7 @@
                     </li>
                 </ul>
             </div>
-            
+
         </div>
 
         @yield('content')
@@ -204,14 +222,14 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
         // 1. Saat Halaman Selesai Loading -> Sembunyikan Loader
-        window.addEventListener("load", function () {
+        window.addEventListener("load", function() {
             const loader = document.getElementById("global-loader");
             loader.classList.add("loader-hidden");
         });
 
         // 2. Deteksi Navigasi Browser (Back/Forward Button)
         // Agar loader hilang jika user tekan tombol Back di browser
-        window.addEventListener("pageshow", function (event) {
+        window.addEventListener("pageshow", function(event) {
             if (event.persisted) {
                 const loader = document.getElementById("global-loader");
                 loader.classList.add("loader-hidden");
@@ -230,10 +248,13 @@
                     const target = link.getAttribute("target");
 
                     // Validasi: Munculkan loader HANYA JIKA link valid & bukan tab baru
-                    if (href && href !== "#" && href !== "javascript:void(0)" && target !== "_blank") {
+                    if (href && href !== "#" && href !== "javascript:void(0)" && target !==
+                        "_blank") {
                         // Jangan munculkan loader jika klik link dropdown (toggle)
-                        if (!link.classList.contains("dropdown-toggle") && !link.hasAttribute("data-bs-toggle")) {
-                            document.getElementById("global-loader").classList.remove("loader-hidden");
+                        if (!link.classList.contains("dropdown-toggle") && !link.hasAttribute(
+                                "data-bs-toggle")) {
+                            document.getElementById("global-loader").classList.remove(
+                                "loader-hidden");
                         }
                     }
                 });
@@ -247,12 +268,14 @@
             });
         });
 
-      function showDOList(soNumber) {
+        function showDOList(soNumber) {
             Swal.fire({
                 title: 'Mencari Surat Jalan...',
                 text: 'Mohon tunggu sebentar',
                 allowOutsideClick: false,
-                didOpen: () => { Swal.showLoading(); }
+                didOpen: () => {
+                    Swal.showLoading();
+                }
             });
 
             fetch(`/get-dos-by-so/${soNumber}`)

@@ -7,6 +7,7 @@ use App\Services\AccurateService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use App\Models\Driver;
 use App\Models\Delivery;
 
@@ -719,5 +720,40 @@ public function checkSoDoLink($soNumber)
             Log::error('UPDATE ALAMAT ERROR: ' . $e->getMessage());
             return response()->json(['success' => false, 'message' => 'Gagal mengupdate alamat: ' . $e->getMessage()]);
         }
+    }
+    public function getOrinLocation($nopol)
+    {
+        $token = env('ORIN_API_TOKEN');
+
+        if (!$token) {
+            return response()->json(['status' => 'error', 'message' => 'Token ORIN belum diatur di .env'], 500);
+        }
+
+        // Endpoint ORIN untuk mengambil data perangkat berdasarkan Nopol
+        // URL di-encode untuk mencegah error jika ada spasi pada Nopol (misal: "L 9245 CB")
+        $url = "https://api-v2.orin.id/api/orin/device/" . urlencode($nopol);
+
+        $response = Http::withToken($token)
+            ->withHeaders(['Accept' => 'application/json'])
+            ->get($url);
+
+        if ($response->successful()) {
+            $data = $response->json();
+            
+            // Mengambil latitude dan longitude berdasarkan format respons ORIN
+            return response()->json([
+                'status' => 'success',
+                'lat' => $data['lat'] ?? null,
+                'lng' => $data['lng'] ?? null,
+                'nopol' => $nopol,
+                'last_update' => $data['updated at'] ?? null // Waktu update terakhir dari ORIN
+            ]);
+        }
+
+        return response()->json([
+            'status' => 'error', 
+            'message' => 'Gagal mengambil data dari ORIN API',
+            'details' => $response->body()
+        ], $response->status());
     }
 }
