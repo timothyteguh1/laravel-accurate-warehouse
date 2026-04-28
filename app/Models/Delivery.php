@@ -17,7 +17,16 @@ class Delivery extends Model
         // ─── TAMBAHAN ALLOW INSERT ───
         'alamat_tujuan',
         'latitude',
-        'longitude'
+        'longitude',
+        // ─── TAMBAHAN TAHAP 1 (TRACKING WAKTU) ───
+        'waktu_berangkat',
+        'waktu_kembali'
+    ];
+
+    // Mengubah format database menjadi objek Carbon DateTime otomatis
+    protected $casts = [
+        'waktu_berangkat' => 'datetime',
+        'waktu_kembali'   => 'datetime',
     ];
 
     // Relasi: 1 Pengiriman (DO) dibawa oleh 1 Sopir

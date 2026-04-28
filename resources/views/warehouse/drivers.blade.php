@@ -31,12 +31,12 @@
                         </div>
                         <div class="text-end">
                             @php
-                                // Ambil DO yang statusnya Di Perjalanan
-                                $activeDOs = $driver->deliveries->where('status', 'Di Perjalanan');
+                                // Ambil DO yang statusnya Di Perjalanan atau sedang dihitung (waktu_berangkat ada tapi belum kembali)
+                                $activeDOs = $driver->deliveries->whereNull('waktu_kembali')->whereNotNull('waktu_berangkat');
                                 $activeCount = $activeDOs->count();
 
                                 // Filter data DO yang punya kordinat, lalu ubah jadi format JSON
-                                $routeData = $activeDOs->filter(function($d) {
+                                $routeData = $driver->deliveries->whereNull('waktu_kembali')->filter(function($d) {
                                     return !empty($d->latitude) && !empty($d->longitude);
                                 })->map(function($d) {
                                     return [
@@ -57,13 +57,13 @@
                         </div>
                     </div>
 
-                    {{-- Tombol Lihat Rute --}}
+                    {{-- Tombol Lihat Rute (OSRM AI) --}}
                     @if($activeCount > 0 && $routeData != '[]')
                         <div class="mt-3">
                             <button class="btn btn-sm btn-outline-primary w-100 fw-bold" 
                                     data-rute="{{ $routeData }}" 
                                     onclick="tampilkanRute(this, '{{ $driver->name }}')">
-                                <i class="fa-solid fa-map-location-dot me-1"></i> Lihat Rute Pengiriman
+                                <i class="fa-solid fa-map-location-dot me-1"></i> Lihat Rute Optimasi AI
                             </button>
                         </div>
                     @endif
@@ -72,20 +72,20 @@
                 {{-- List DO yang Dibawa --}}
                 <div class="card-body">
                     <hr class="text-muted opacity-25">
-                    <h6 class="text-muted small fw-bold mb-3">RIWAYAT PENGIRIMAN:</h6>
+                    <h6 class="text-muted small fw-bold mb-3">DAFTAR PENGIRIMAN:</h6>
                     
                     @if($driver->deliveries->count() > 0)
                         <div class="list-group list-group-flush">
                             @foreach($driver->deliveries as $delivery)
-                                <div class="list-group-item px-0 py-2 d-flex justify-content-between align-items-start border-0">
-                                    <div>
+                                <div class="list-group-item px-0 py-2 d-flex justify-content-between align-items-start border-0 border-bottom">
+                                    <div class="pe-2">
                                         <div class="fw-bold text-primary">{{ $delivery->accurate_do_number }}</div>
                                         <small class="text-muted">{{ $delivery->created_at->format('d M Y, H:i') }}</small>
                                         
                                         @if($delivery->alamat_tujuan)
                                             <div class="small mt-1 text-secondary d-flex align-items-center" style="font-size: 0.75rem;">
                                                 <span><i class="fa-solid fa-location-dot me-1"></i> {{ \Illuminate\Support\Str::limit($delivery->alamat_tujuan, 35) }}</span>
-                                                @if($delivery->status != 'Selesai')
+                                                @if(empty($delivery->waktu_kembali))
                                                 <button class="btn btn-sm btn-link text-primary p-0 ms-2" onclick="editAlamat('{{ $delivery->id }}', '{{ $delivery->accurate_do_number }}')" title="Edit Alamat">
                                                     <i class="fa-solid fa-pen-to-square"></i>
                                                 </button>
@@ -94,7 +94,7 @@
                                         @else
                                             <div class="small mt-1 text-danger d-flex align-items-center" style="font-size: 0.75rem;">
                                                 <span><i class="fa-solid fa-triangle-exclamation me-1"></i> Alamat belum diisi</span>
-                                                @if($delivery->status != 'Selesai')
+                                                @if(empty($delivery->waktu_kembali))
                                                 <button class="btn btn-sm btn-link text-primary p-0 ms-2" onclick="editAlamat('{{ $delivery->id }}', '{{ $delivery->accurate_do_number }}')" title="Isi Alamat">
                                                     <i class="fa-solid fa-pen-to-square"></i>
                                                 </button>
@@ -103,17 +103,39 @@
                                         @endif
                                     </div>
                                     
-                                    @if($delivery->status == 'Selesai')
-                                        <span class="badge bg-success bg-opacity-10 text-success border border-success mt-1">
-                                            <i class="fa-solid fa-check-double me-1"></i> Selesai
-                                        </span>
-                                    @elseif($delivery->status == 'Di Perjalanan')
-                                        <span class="badge bg-warning bg-opacity-10 text-warning border border-warning mt-1">
-                                            <i class="fa-solid fa-route me-1"></i> Jalan
-                                        </span>
-                                    @else
-                                        <span class="badge bg-secondary mt-1">{{ $delivery->status }}</span>
-                                    @endif
+                                    {{-- ── TAHAP 2: KENDALI TRACKING TIAP DO ── --}}
+                                    <div class="text-end" style="min-width: 90px;">
+                                        @if(empty($delivery->waktu_berangkat))
+                                            {{-- BELUM BERANGKAT --}}
+                                            <form action="{{ route('delivery.start', $delivery->id) }}" method="POST">
+                                                @csrf
+                                                <button type="submit" class="btn btn-sm btn-primary mt-1 shadow-sm w-100">
+                                                    <i class="fa-solid fa-truck-fast"></i> Mulai
+                                                </button>
+                                            </form>
+                                        @elseif(!empty($delivery->waktu_berangkat) && empty($delivery->waktu_kembali))
+                                            {{-- DALAM PERJALANAN (LIVE) --}}
+                                            <div class="d-flex flex-column gap-1 mt-1">
+                                                <button class="btn btn-sm btn-info text-white shadow-sm w-100" onclick="Swal.fire('Info', 'Fitur Live Tracking (Tahap 3) sedang disiapkan.', 'info')">
+                                                    <i class="fa-solid fa-location-crosshairs"></i> Live
+                                                </button>
+                                                <form action="{{ route('delivery.end', $delivery->id) }}" method="POST">
+                                                    @csrf
+                                                    <button type="submit" class="btn btn-sm btn-danger shadow-sm w-100" onclick="return confirm('Akhiri pengiriman DO ini?')">
+                                                        <i class="fa-solid fa-flag-checkered"></i> Selesai
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        @else
+                                            {{-- SELESAI --}}
+                                            <span class="badge bg-success bg-opacity-10 text-success border border-success mt-1 mb-1 d-block w-100">
+                                                <i class="fa-solid fa-check-double me-1"></i> Selesai
+                                            </span>
+                                            <button class="btn btn-sm btn-outline-dark shadow-sm w-100" onclick="Swal.fire('Info', 'Fitur Audit Riwayat ORIN (Tahap 4) sedang disiapkan.', 'info')">
+                                                <i class="fa-solid fa-clock-rotate-left"></i> Audit
+                                            </button>
+                                        @endif
+                                    </div>
                                 </div>
                             @endforeach
                         </div>
@@ -134,7 +156,7 @@
     </div>
 </div>
 
-{{-- ── Modal Peta Rute ── --}}
+{{-- ── Modal Peta Rute (TETAP AMAN) ── --}}
 <div class="modal fade" id="modalRute" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg">
@@ -153,7 +175,7 @@
     </div>
 </div>
 
-{{-- ── Script Peta (Leaflet + OSRM) ── --}}
+{{-- ── Script Peta (Leaflet + OSRM) (TETAP AMAN) ── --}}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
@@ -162,11 +184,9 @@
     let routeLayer;
     let markersLayer = L.layerGroup(); 
 
-    // ⚠️ PENTING: Ganti dengan titik Latitude & Longitude Gudang (Toko) Kamu
     const WAREHOUSE_LAT = -7.332500; 
     const WAREHOUSE_LNG = 112.774900;
 
-    // FUNGSI HELPER: Ubah detik jadi format Waktu yang rapi
     function formatWaktu(detik) {
         const m = Math.round(detik / 60);
         if (m < 60) return `${m} mnt`;
@@ -175,7 +195,6 @@
         return `${h} jam ${rm} mnt`;
     }
 
-    // FUNGSI HELPER: Ubah meter jadi Kilometer
     function formatJarak(meter) {
         return (meter / 1000).toFixed(1) + ' km';
     }
@@ -200,11 +219,9 @@
             if (routeLayer) map.removeLayer(routeLayer);
             markersLayer.clearLayers();
             
-            // Hapus kotak info rute lama jika ada
             const oldInfo = document.getElementById('infoTotalRute');
             if(oldInfo) oldInfo.remove();
 
-            // Setup Marker Gudang Sementara
             const gudangIcon = L.divIcon({
                 className: 'custom-icon',
                 html: `<div style='background:#10b981; padding:8px; border-radius:50%; border:3px solid white; box-shadow:0 3px 6px rgba(0,0,0,0.3);'><i class="fa-solid fa-warehouse text-white"></i></div>`,
@@ -230,7 +247,6 @@
                     if (data.code === 'Ok') {
                         const trip = data.trips[0];
 
-                        // ─── TAMPILKAN INFO TOTAL ESTIMASI (Kotak Melayang di Peta) ───
                         let boxInfo = document.createElement('div');
                         boxInfo.id = 'infoTotalRute';
                         boxInfo.className = 'bg-white p-2 px-3 shadow rounded position-absolute top-0 end-0 m-3';
@@ -242,7 +258,6 @@
                             <span class="text-muted small"><i class="fa-solid fa-route me-1"></i> ${formatJarak(trip.distance)}</span>
                         `;
                         document.getElementById('mapArea').appendChild(boxInfo);
-                        // ─────────────────────────────────────────────────────────────
 
                         let outboundCoords = [];
                         let returnCoords = [];
@@ -268,8 +283,7 @@
 
                         map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
 
-                        // ─── UPDATE ISI POPUP GUDANG (Tambahkan Estimasi Pulang) ───
-                        const returnLeg = trip.legs[trip.legs.length - 1]; // Leg Terakhir = Rute Pulang
+                        const returnLeg = trip.legs[trip.legs.length - 1]; 
                         markerGudang.bindPopup(`
                             <div class="text-center">
                                 <b class="text-success fs-6">📍 GUDANG (AWAL & AKHIR)</b>
@@ -280,7 +294,6 @@
                                 </div>
                             </div>
                         `);
-                        // ─────────────────────────────────────────────────────────────
 
                         data.waypoints.forEach((wp, index) => {
                             if (index === 0) return;
@@ -288,8 +301,6 @@
                             const doData = routeData[index - 1]; 
                             const urutanOptimasi = wp.waypoint_index; 
                             
-                            // ─── AMBIL ESTIMASI TIAP TITIK DO ───
-                            // Logika: trip.legs[0] adalah rute ke waypoint ke-1. trip.legs[1] adalah rute ke waypoint ke-2.
                             const arrivingLeg = trip.legs[urutanOptimasi - 1];
 
                             const urutanIcon = L.divIcon({
@@ -325,6 +336,7 @@
         }, { once: true }); 
     }
 
+    // ── PENCARIAN NOMINATIM (TETAP AMAN) ──
     function editAlamat(deliveryId, doNumber) {
         Swal.fire({
             title: 'Edit Alamat Tujuan',
@@ -398,7 +410,7 @@
                 const lng = document.getElementById('edit_longitude').value;
                 
                 if (!lat || !lng) {
-                    Swal.showValidationMessage('Silakan cari dan klik alamat dari daftar *dropdown* agar kordinatnya terbaca!');
+                    Swal.showValidationMessage('Silakan cari dan klik alamat dari daftar dropdown!');
                     return false;
                 }
 

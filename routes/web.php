@@ -23,30 +23,30 @@ Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
     // Accurate OAuth
-    Route::get('/accurate/auth',     [AccurateTestController::class, 'login'])->name('accurate.auth');
+    Route::get('/accurate/auth', [AccurateTestController::class, 'login'])->name('accurate.auth');
     Route::get('/accurate/callback', [AccurateTestController::class, 'callback'])->name('accurate.callback');
-    Route::get('/accurate/open-db',  [AccurateTestController::class, 'openDatabase'])->name('accurate.open_db');
+    Route::get('/accurate/open-db', [AccurateTestController::class, 'openDatabase'])->name('accurate.open_db');
 
     // Dashboard
-    Route::get('/dashboard',         [WarehouseController::class, 'dashboard']);
+    Route::get('/dashboard', [WarehouseController::class, 'dashboard']);
     Route::get('/dashboard/refresh', [WarehouseController::class, 'refreshDashboard'])->name('dashboard.refresh');
 
     // Operasional Gudang
-    Route::get('/scan-so',                    [WarehouseController::class, 'scanSOListPage']);
-    Route::get('/scan-process/{id}',          [WarehouseController::class, 'scanSODetailPage']);   // handles QUEUE & WAITING
-    Route::post('/scan-process/submit',       [WarehouseController::class, 'submitDOWithLocalLookup']);
-    Route::get('/print-do/{id}',              [WarehouseController::class, 'printDeliveryOrder']);
-    Route::get('/history-do',                 [WarehouseController::class, 'historyDOPage']);
-    Route::get('/find-do-print/{soNumber}',   [WarehouseController::class, 'searchAndPrintDO']);
+    Route::get('/scan-so', [WarehouseController::class, 'scanSOListPage']);
+    Route::get('/scan-process/{id}', [WarehouseController::class, 'scanSODetailPage']);   // handles QUEUE & WAITING
+    Route::post('/scan-process/submit', [WarehouseController::class, 'submitDOWithLocalLookup']);
+    Route::get('/print-do/{id}', [WarehouseController::class, 'printDeliveryOrder']);
+    Route::get('/history-do', [WarehouseController::class, 'historyDOPage']);
+    Route::get('/find-do-print/{soNumber}', [WarehouseController::class, 'searchAndPrintDO']);
 
     // Fitur Lain
     Route::get('/sales-order/create', [SalesOrderController::class, 'create']);
     Route::post('/sales-order/store', [SalesOrderController::class, 'store']);
-    Route::get('/inventory',          [InventoryController::class, 'index']);
+    Route::get('/inventory', [InventoryController::class, 'index']);
 
     // Debug SO Status
     Route::prefix('debug')->name('so.status.')->group(function () {
-        Route::get('/so-status',      [SalesOrderStatusController::class, 'index'])->name('index');
+        Route::get('/so-status', [SalesOrderStatusController::class, 'index'])->name('index');
         Route::get('/so-status/{id}', [SalesOrderStatusController::class, 'show'])->name('show');
     });
 
@@ -59,24 +59,29 @@ Route::middleware('auth')->group(function () {
     Route::post('/delivery/update-alamat', [App\Http\Controllers\WarehouseController::class, 'updateAlamat']);
 
     // Route Internal untuk jembatan Live Tracking ORIN
-    Route::get('/api/track-driver/{nopol}', [\App\Http\Controllers\WarehouseController::class, 'getOrinLocation']);
+    Route::get('/api/track-driver/{nopol}', [App\Http\Controllers\WarehouseController::class, 'getOrinLocation']);
+    Route::post('/delivery/{id}/start', [WarehouseController::class, 'startDelivery'])->name('delivery.start');
+    Route::post('/delivery/{id}/end', [WarehouseController::class, 'endDelivery'])->name('delivery.end');
 
     // ORIN Fleet Monitoring
     Route::prefix('orin')->name('orin.')->group(function () {
         // [Tambahkan route debug disini]
         Route::get('/debug/test', [OrinController::class, 'testConnection'])->name('test.connection');
 
-        Route::get('/',                          [OrinController::class, 'index'])->name('index');
-        Route::get('/device/{vehicleId}',        [OrinController::class, 'show'])->name('device');
-        Route::get('/',                           [OrinController::class, 'index'])->name('index');
-        Route::get('/device/{vehicleId}',         [OrinController::class, 'show'])->name('device');
+        Route::get('/', [OrinController::class, 'index'])->name('index');
+        Route::get('/device/{vehicleId}', [OrinController::class, 'show'])->name('device');
+        Route::get('/', [OrinController::class, 'index'])->name('index');
+        Route::get('/device/{vehicleId}', [OrinController::class, 'show'])->name('device');
         Route::get('/device/{vehicleId}/history', [OrinController::class, 'historyRoutes'])->name('history');
-        Route::get('/alerts',                     [OrinController::class, 'alerts'])->name('alerts');
+        Route::get('/alerts', [OrinController::class, 'alerts'])->name('alerts');
 
         // JSON API endpoints (peta live, dll)
-        Route::get('/api/devices',                [OrinController::class, 'apiDevices']);
-        Route::get('/api/raw/{vehicleId}',        [OrinController::class, 'apiRawData']);
-        Route::post('/api/available',             [OrinController::class, 'apiUpdateAvailable']);
+        Route::get('/api/devices', [OrinController::class, 'apiDevices']);
+        Route::get('/api/raw/{vehicleId}', [OrinController::class, 'apiRawData']);
+        Route::post('/api/available', [OrinController::class, 'apiUpdateAvailable']);
+
+        // Rute untuk Tombol Kendali Pelacakan (DO)
+
     });
 
     // DIHAPUS: Route::get('/waiting-so/{id}', ...) — tidak diperlukan lagi

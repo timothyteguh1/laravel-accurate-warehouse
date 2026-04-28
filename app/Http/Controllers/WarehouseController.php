@@ -756,4 +756,31 @@ public function checkSoDoLink($soNumber)
             'details' => $response->body()
         ], $response->status());
     }
+    // ─── TAHAP 2: KENDALI WAKTU PENGIRIMAN (TRACKING) ───
+
+    public function startDelivery($id)
+    {
+        $delivery = \App\Models\Delivery::findOrFail($id);
+        
+        // Catat waktu berangkat saat ini
+        $delivery->waktu_berangkat = now();
+        $delivery->status = 'Di Perjalanan'; 
+        $delivery->save();
+
+        return back()->with('success', 'Status: Truk Berangkat. Pelacakan Live siap dimulai.');
+    }
+
+    public function endDelivery($id)
+    {
+        $delivery = \App\Models\Delivery::findOrFail($id);
+        
+        // Catat waktu kembali saat ini
+        $delivery->waktu_kembali = now();
+        $delivery->status = 'Selesai'; 
+        $delivery->save();
+
+        return back()->with('success', 'Status: Pengiriman Selesai. Riwayat perjalanan dikunci.');
+    }
+
+    
 }
