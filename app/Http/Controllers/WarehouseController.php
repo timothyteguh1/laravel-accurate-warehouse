@@ -721,40 +721,47 @@ public function checkSoDoLink($soNumber)
             return response()->json(['success' => false, 'message' => 'Gagal mengupdate alamat: ' . $e->getMessage()]);
         }
     }
-    public function getOrinLocation($nopol)
+    // ─── TAHAP 3: API JEMBATAN LIVE TRACKING (MENGGUNAKAN SN ORIN) ───
+    public function getOrinLocation($sn)
     {
         $token = env('ORIN_API_TOKEN');
 
         if (!$token) {
-            return response()->json(['status' => 'error', 'message' => 'Token ORIN belum diatur di .env'], 500);
+            return response()->json(['success' => false, 'message' => 'Token ORIN belum diatur di .env'], 500);
         }
 
-        // Endpoint ORIN untuk mengambil data perangkat berdasarkan Nopol
-        // URL di-encode untuk mencegah error jika ada spasi pada Nopol (misal: "L 9245 CB")
-        $url = "https://api-v2.orin.id/api/orin/device/" . urlencode($nopol);
+        // Tembak API menggunakan Serial Number (SN) ORIN
+        $url = "https://api-v2.orin.id/api/orin/device/" . urlencode($sn);
 
         $response = Http::withToken($token)
             ->withHeaders(['Accept' => 'application/json'])
             ->get($url);
 
         if ($response->successful()) {
-            $data = $response->json();
-            
-            // Mengambil latitude dan longitude berdasarkan format respons ORIN
+            $resBody = $response->json();
+            $data = $resBody['data'] ?? $resBody; 
+            $loc = $data['last_location'] ?? $data ?? [];
+
+            // Smart Fallback Status
+            $rawStatus = $data['device_status'] ?? $data['status'] ?? null;
+            if (!$rawStatus) {
+                $rawStatus = ((float)($loc['speed'] ?? 0)) > 0 ? 'MOVING' : 'PARKING';
+            }
+
             return response()->json([
-                'status' => 'success',
-                'lat' => $data['lat'] ?? null,
-                'lng' => $data['lng'] ?? null,
-                'nopol' => $nopol,
-                'last_update' => $data['updated at'] ?? null // Waktu update terakhir dari ORIN
+                'success' => true,
+                'data' => [
+                    'lat' => $loc['lat'] ?? null,
+                    'lng' => $loc['lng'] ?? null,
+                    'speed' => $loc['speed'] ?? 0,
+                    'status' => strtoupper($rawStatus),
+                    'sn' => $sn,
+                ],
+                'has_alert' => false // Disiapkan untuk sistem keamanan Tahap 4
             ]);
         }
 
-        return response()->json([
-            'status' => 'error', 
-            'message' => 'Gagal mengambil data dari ORIN API',
-            'details' => $response->body()
-        ], $response->status());
+        return response()->json(['success' => false, 'message' => 'Gagal akses ORIN'], 404);
     }
     // ─── TAHAP 2: KENDALI WAKTU PENGIRIMAN (TRACKING) ───
 

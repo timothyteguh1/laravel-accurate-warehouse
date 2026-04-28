@@ -9,7 +9,12 @@ class Driver extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name', 'license_plate'];
+    protected $fillable = [
+        'name',
+        'license_plate',
+        'phone',
+        'orin_device_sn' // <-- Tambahan Jembatan ORIN
+    ];
 
     // Relasi: 1 Sopir bisa membawa banyak DO (Deliveries)
     public function deliveries()

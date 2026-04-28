@@ -59,7 +59,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/delivery/update-alamat', [App\Http\Controllers\WarehouseController::class, 'updateAlamat']);
 
     // Route Internal untuk jembatan Live Tracking ORIN
-    Route::get('/api/track-driver/{nopol}', [App\Http\Controllers\WarehouseController::class, 'getOrinLocation']);
+    // Route Internal untuk jembatan Live Tracking ORIN
+    Route::get('/api/track-driver/{sn}', [App\Http\Controllers\WarehouseController::class, 'getOrinLocation']);
     Route::post('/delivery/{id}/start', [WarehouseController::class, 'startDelivery'])->name('delivery.start');
     Route::post('/delivery/{id}/end', [WarehouseController::class, 'endDelivery'])->name('delivery.end');
 

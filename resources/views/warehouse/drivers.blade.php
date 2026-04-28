@@ -103,7 +103,7 @@
                                         @endif
                                     </div>
                                     
-                                    {{-- ── TAHAP 2: KENDALI TRACKING TIAP DO ── --}}
+                                    {{-- ── TAHAP 2 & 3: KENDALI TRACKING TIAP DO ── --}}
                                     <div class="text-end" style="min-width: 90px;">
                                         @if(empty($delivery->waktu_berangkat))
                                             {{-- BELUM BERANGKAT --}}
@@ -116,7 +116,9 @@
                                         @elseif(!empty($delivery->waktu_berangkat) && empty($delivery->waktu_kembali))
                                             {{-- DALAM PERJALANAN (LIVE) --}}
                                             <div class="d-flex flex-column gap-1 mt-1">
-                                                <button class="btn btn-sm btn-info text-white shadow-sm w-100" onclick="Swal.fire('Info', 'Fitur Live Tracking (Tahap 3) sedang disiapkan.', 'info')">
+                                                {{-- TOMBOL LIVE (Memicu Peta Dinamis) --}}
+                                                <button class="btn btn-sm btn-info text-white shadow-sm w-100" 
+                                                        onclick="showLiveTrack('{{ $driver->orin_device_sn }}', '{{ $driver->name }}')">
                                                     <i class="fa-solid fa-location-crosshairs"></i> Live
                                                 </button>
                                                 <form action="{{ route('delivery.end', $delivery->id) }}" method="POST">
@@ -156,7 +158,7 @@
     </div>
 </div>
 
-{{-- ── Modal Peta Rute (TETAP AMAN) ── --}}
+{{-- ── Modal Peta Rute (OSRM TETAP AMAN) ── --}}
 <div class="modal fade" id="modalRute" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg">
@@ -175,17 +177,127 @@
     </div>
 </div>
 
-{{-- ── Script Peta (Leaflet + OSRM) (TETAP AMAN) ── --}}
+{{-- ── Modal Live Tracking Dinamis (TAHAP 3) ── --}}
+<div class="modal fade" id="modalLiveTrack" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title fw-bold" id="liveTrackLabel">Live Tracking Armada</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0 position-relative">
+                <div id="liveMapArea" style="height: 500px; width: 100%; z-index: 1;"></div>
+                <div id="liveInfoBox" class="position-absolute top-0 end-0 m-3 p-3 bg-white shadow rounded border-start border-info border-4" style="z-index: 1000; display:none; min-width: 150px;">
+                    <small class="text-muted fw-bold">STATUS KENDARAAN</small><br>
+                    <span id="liveStatusText" class="badge bg-success mb-2 mt-1">MOVING</span><br>
+                    <span class="fw-bold fs-4"><i class="fa-solid fa-gauge-high text-info me-1"></i> <span id="liveSpeedText">0</span> <small class="fs-6 text-muted">km/h</small></span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{{-- ── Script Peta (Leaflet + OSRM) ── --}}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
 <script>
+    const WAREHOUSE_LAT = -7.332500; 
+    const WAREHOUSE_LNG = 112.774900;
+
+    // ==========================================
+    // LOGIKA TAHAP 3: LIVE TRACKING (ORIN)
+    // ==========================================
+    let liveMap, liveMarker, liveInterval;
+
+    function showLiveTrack(sn, name) {
+        if (!sn || sn === '') {
+            Swal.fire('Error!', 'Sopir ini belum dihubungkan dengan perangkat GPS (SN Kosong). Silakan setel orin_device_sn di database.', 'error');
+            return;
+        }
+
+        document.getElementById('liveTrackLabel').innerText = `Live Radar: ${name} (SN: ${sn})`;
+        const modal = new bootstrap.Modal(document.getElementById('modalLiveTrack'));
+        modal.show();
+
+        document.getElementById('modalLiveTrack').addEventListener('shown.bs.modal', function () {
+            // Inisialisasi peta hanya sekali
+            if (!liveMap) {
+                liveMap = L.map('liveMapArea').setView([WAREHOUSE_LAT, WAREHOUSE_LNG], 15);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(liveMap);
+            }
+            
+            // Fix issue abu-abu pada modal leaflet
+            setTimeout(() => { liveMap.invalidateSize(); }, 200);
+
+            // Fetch pertama langsung
+            updateLivePosition(sn);
+
+            // Fetch berulang setiap 15 detik
+            liveInterval = setInterval(() => updateLivePosition(sn), 15000);
+        }, { once: true });
+    }
+
+    function updateLivePosition(sn) {
+        fetch(`/api/track-driver/${sn}`)
+            .then(r => r.json())
+            .then(res => {
+                if (res.success && res.data) {
+                    const lat = parseFloat(res.data.lat);
+                    const lng = parseFloat(res.data.lng);
+                    const speed = res.data.speed;
+                    const status = res.data.status; // MOVING atau PARKING
+
+                    if (isNaN(lat) || isNaN(lng)) return;
+
+                    const pos = [lat, lng];
+                    const color = status === 'MOVING' ? '#22c55e' : '#f59e0b';
+                    const iconEmoji = status === 'MOVING' ? '🚛' : '🅿️';
+
+                    // Buat icon dinamis
+                    const trukIcon = L.divIcon({
+                        className: 'live-truck-icon',
+                        html: `<div style="background:${color}; width:36px; height:36px; border-radius:50%; border:3px solid white; display:flex; align-items:center; justify-content:center; font-size:18px; box-shadow:0 3px 6px rgba(0,0,0,0.3);">${iconEmoji}</div>`,
+                        iconSize: [36, 36], iconAnchor: [18, 18]
+                    });
+
+                    // Jika marker belum ada, buat baru
+                    if (!liveMarker) {
+                        liveMarker = L.marker(pos, { icon: trukIcon }).addTo(liveMap);
+                    } else {
+                        // Jika sudah ada, update posisi map dan warnanya dengan mulus
+                        liveMarker.setLatLng(pos);
+                        liveMarker.setIcon(trukIcon);
+                    }
+
+                    // Pindahkan kamera map mengikuti truk
+                    liveMap.panTo(pos);
+
+                    // Update UI Info Box
+                    document.getElementById('liveInfoBox').style.display = 'block';
+                    document.getElementById('liveStatusText').innerText = status;
+                    document.getElementById('liveStatusText').className = `badge bg-${status === 'MOVING' ? 'success' : 'warning'} mb-2 mt-1`;
+                    document.getElementById('liveSpeedText').innerText = speed;
+                }
+            })
+            .catch(err => console.error("Error ORIN Track:", err));
+    }
+
+    // Matikan radar pelacakan ketika modal ditutup (Hemat performa browser & server)
+    document.getElementById('modalLiveTrack').addEventListener('hidden.bs.modal', function () {
+        clearInterval(liveInterval);
+        if (liveMarker) { 
+            liveMap.removeLayer(liveMarker); 
+            liveMarker = null; 
+        }
+    });
+
+    // ==========================================
+    // LOGIKA OSRM (ASLI TETAP AMAN)
+    // ==========================================
     let map;
     let routeLayer;
     let markersLayer = L.layerGroup(); 
-
-    const WAREHOUSE_LAT = -7.332500; 
-    const WAREHOUSE_LNG = 112.774900;
 
     function formatWaktu(detik) {
         const m = Math.round(detik / 60);
@@ -336,7 +448,9 @@
         }, { once: true }); 
     }
 
-    // ── PENCARIAN NOMINATIM (TETAP AMAN) ──
+    // ==========================================
+    // LOGIKA NOMINATIM (ASLI TETAP AMAN)
+    // ==========================================
     function editAlamat(deliveryId, doNumber) {
         Swal.fire({
             title: 'Edit Alamat Tujuan',
