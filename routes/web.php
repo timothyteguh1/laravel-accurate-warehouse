@@ -57,12 +57,16 @@ Route::middleware('auth')->group(function () {
     // Monitor Sopir & Armada
     Route::get('/drivers', [WarehouseController::class, 'driverMonitor']);
     Route::post('/delivery/update-alamat', [App\Http\Controllers\WarehouseController::class, 'updateAlamat']);
+    Route::post('/driver/update-sn', [App\Http\Controllers\WarehouseController::class, 'updateDriverSN']);
 
     // Route Internal untuk jembatan Live Tracking ORIN
     // Route Internal untuk jembatan Live Tracking ORIN
     Route::get('/api/track-driver/{sn}', [App\Http\Controllers\WarehouseController::class, 'getOrinLocation']);
     Route::post('/delivery/{id}/start', [WarehouseController::class, 'startDelivery'])->name('delivery.start');
     Route::post('/delivery/{id}/end', [WarehouseController::class, 'endDelivery'])->name('delivery.end');
+    Route::get('/audit/data/{deliveryId}', [WarehouseController::class, 'getAuditData']);
+    Route::post('/audit/save', [WarehouseController::class, 'saveAudit']);
+    Route::post('/audit/approve/{id}', [WarehouseController::class, 'approveAudit']);
 
     // ORIN Fleet Monitoring
     Route::prefix('orin')->name('orin.')->group(function () {

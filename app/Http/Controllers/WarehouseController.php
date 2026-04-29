@@ -10,14 +10,18 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use App\Models\Driver;
 use App\Models\Delivery;
+use App\Services\OrinService;
+use App\Models\DeliveryAudit;
 
 class WarehouseController extends Controller
 {
     protected $accurate;
+    protected $orin;
 
-    public function __construct(AccurateService $accurate)
+    public function __construct(AccurateService $accurate, OrinService $orin)
     {
         $this->accurate = $accurate;
+        $this->orin = $orin;
     }
 
     // 1. DASHBOARD
@@ -721,47 +725,43 @@ public function checkSoDoLink($soNumber)
             return response()->json(['success' => false, 'message' => 'Gagal mengupdate alamat: ' . $e->getMessage()]);
         }
     }
-    // ─── TAHAP 3: API JEMBATAN LIVE TRACKING (MENGGUNAKAN SN ORIN) ───
+   // ─── TAHAP 3: API JEMBATAN LIVE TRACKING (VERSI AUTO-CENTER) ───
     public function getOrinLocation($sn)
     {
-        $token = env('ORIN_API_TOKEN');
+        // Gunakan taktik ambil semua data agar lebih stabil (seperti ORIN Fleet)
+        $result = $this->orin->getAllDevices();
 
-        if (!$token) {
-            return response()->json(['success' => false, 'message' => 'Token ORIN belum diatur di .env'], 500);
+        if (!$result['success']) {
+            return response()->json(['success' => false, 'message' => 'Gagal akses satelit'], 404);
         }
 
-        // Tembak API menggunakan Serial Number (SN) ORIN
-        $url = "https://api-v2.orin.id/api/orin/device/" . urlencode($sn);
+        $devices = $result['data']['data'] ?? $result['data'] ?? [];
+        $foundDevice = null;
 
-        $response = Http::withToken($token)
-            ->withHeaders(['Accept' => 'application/json'])
-            ->get($url);
-
-        if ($response->successful()) {
-            $resBody = $response->json();
-            $data = $resBody['data'] ?? $resBody; 
-            $loc = $data['last_location'] ?? $data ?? [];
-
-            // Smart Fallback Status
-            $rawStatus = $data['device_status'] ?? $data['status'] ?? null;
-            if (!$rawStatus) {
-                $rawStatus = ((float)($loc['speed'] ?? 0)) > 0 ? 'MOVING' : 'PARKING';
+        foreach ($devices as $d) {
+            $deviceSn = (string) ($d['device_sn'] ?? $d['sn'] ?? '');
+            if ($deviceSn === (string)trim($sn)) {
+                $foundDevice = $d;
+                break;
             }
-
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    'lat' => $loc['lat'] ?? null,
-                    'lng' => $loc['lng'] ?? null,
-                    'speed' => $loc['speed'] ?? 0,
-                    'status' => strtoupper($rawStatus),
-                    'sn' => $sn,
-                ],
-                'has_alert' => false // Disiapkan untuk sistem keamanan Tahap 4
-            ]);
         }
 
-        return response()->json(['success' => false, 'message' => 'Gagal akses ORIN'], 404);
+        if (!$foundDevice) {
+            return response()->json(['success' => false, 'message' => 'SN tidak ditemukan'], 404);
+        }
+
+        $loc = $foundDevice['last_location'] ?? $foundDevice;
+        $speed = (float)($loc['speed'] ?? 0);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'lat'    => $loc['lat'] ?? null,
+                'lng'    => $loc['lng'] ?? null,
+                'speed'  => $speed,
+                'status' => $speed > 0 ? 'MOVING' : 'PARKING',
+            ]
+        ]);
     }
     // ─── TAHAP 2: KENDALI WAKTU PENGIRIMAN (TRACKING) ───
 
@@ -788,6 +788,186 @@ public function checkSoDoLink($soNumber)
 
         return back()->with('success', 'Status: Pengiriman Selesai. Riwayat perjalanan dikunci.');
     }
+    // --- FUNGSI UPDATE SN ORIN DARI UI ---
+    public function updateDriverSN(Request $request)
+    {
+        try {
+            $driver = Driver::findOrFail($request->driver_id);
+            $driver->update([
+                'orin_device_sn' => trim($request->sn)
+            ]);
 
+            return response()->json(['success' => true, 'message' => 'SN GPS berhasil disimpan!']);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Gagal menyimpan SN: ' . $e->getMessage()]);
+        }
+    }
+
+    public function getAuditData($deliveryId)
+{
+    try {
+        $delivery = Delivery::with('driver')->findOrFail($deliveryId);
+ 
+        // Cek apakah audit sudah pernah dibuat sebelumnya (draft)
+        $existingAudit = DeliveryAudit::where('delivery_id', $deliveryId)->first();
+ 
+        // Ambil detail DO dari Accurate untuk menampilkan info barang
+        $doDetail = null;
+        try {
+            $res = $this->accurate->get('delivery-order/detail.do', [
+                'id' => $delivery->accurate_do_id,
+            ]);
+            $doDetail = $res['d'] ?? null;
+        } catch (\Exception $e) {
+            Log::warning("Audit: Gagal ambil DO detail dari Accurate: " . $e->getMessage());
+        }
+ 
+        return response()->json([
+            'success'        => true,
+            'delivery'       => $delivery,
+            'existing_audit' => $existingAudit,
+            'do_detail'      => $doDetail,
+        ]);
+ 
+    } catch (\Exception $e) {
+        return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+    }
+}
+ 
+// ─────────────────────────────────────────────────────────────
+// 13. SIMPAN AUDIT (DRAFT — bisa disimpan berkali-kali)
+// ─────────────────────────────────────────────────────────────
+public function saveAudit(Request $request)
+{
+    try {
+        $data = [
+            'pod_status'      => $request->pod_status,
+            'pod_catatan'     => $request->pod_catatan,
+ 
+            'ada_retur'       => (bool) $request->ada_retur,
+            'retur_persen'    => $request->ada_retur ? (float) $request->retur_persen : 0,
+            'retur_alasan'    => $request->ada_retur ? $request->retur_alasan : null,
+            'retur_catatan'   => $request->retur_catatan,
+ 
+            'uang_diberikan'  => (float) ($request->uang_diberikan ?? 0),
+            'biaya_bbm'       => (float) ($request->biaya_bbm  ?? 0),
+            'biaya_tol'       => (float) ($request->biaya_tol  ?? 0),
+            'biaya_kuli'      => (float) ($request->biaya_kuli ?? 0),
+            'biaya_lain'      => (float) ($request->biaya_lain ?? 0),
+            'catatan_biaya'   => $request->catatan_biaya,
+ 
+            'accurate_action' => $request->accurate_action ?? 'none',
+            'status'          => 'draft',
+        ];
+ 
+        // Upsert — update jika sudah ada, buat baru jika belum
+        $audit = DeliveryAudit::updateOrCreate(
+            ['delivery_id' => $request->delivery_id],
+            $data
+        );
+ 
+        return response()->json([
+            'success'  => true,
+            'audit_id' => $audit->id,
+            'message'  => 'Draft audit berhasil disimpan.',
+        ]);
+ 
+    } catch (\Exception $e) {
+        Log::error('SAVE AUDIT ERROR: ' . $e->getMessage());
+        return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+    }
+}
+ 
+// ─────────────────────────────────────────────────────────────
+// 14. APPROVE AUDIT (FINALISASI — tidak bisa di-undo)
+// ─────────────────────────────────────────────────────────────
+public function approveAudit(Request $request, $auditId)
+{
+    try {
+        $audit    = DeliveryAudit::findOrFail($auditId);
+        $delivery = $audit->delivery;
+ 
+        if ($audit->status === 'approved') {
+            return response()->json(['success' => false, 'message' => 'Audit ini sudah pernah di-approve.']);
+        }
+ 
+        $accurateResult = null;
+ 
+        // ── Eksekusi aksi ke Accurate (jika dipilih) ────────────────────────
+        if ($audit->accurate_action !== 'none') {
+            try {
+                if ($audit->accurate_action === 'close_do') {
+                    // Tutup DO di Accurate
+                    $res = $this->accurate->post('delivery-order/close.do', [
+                        'id' => $delivery->accurate_do_id,
+                    ]);
+                    $accurateResult = $res;
+ 
+                } elseif ($audit->accurate_action === 'create_invoice') {
+                    // Ambil detail DO dulu untuk data Invoice
+                    $doRes  = $this->accurate->get('delivery-order/detail.do', ['id' => $delivery->accurate_do_id]);
+                    $doData = $doRes['d'] ?? null;
+ 
+                    if ($doData) {
+                        // Buat Sales Invoice dari DO
+                        $invoicePayload = [
+                            'transDate'              => date('d/m/Y'),
+                            'customerNo'             => $doData['customer']['customerNo'],
+                            'description'            => 'Invoice otomatis dari Audit: ' . $delivery->accurate_do_number,
+                            'deliveryOrderNumber'    => $delivery->accurate_do_number,
+                            'detailItem'             => array_map(function ($item) {
+                                return [
+                                    'itemNo'   => $item['item']['no'],
+                                    'quantity' => $item['quantity'],
+                                    'itemUnit' => is_array($item['itemUnit']) ? $item['itemUnit']['name'] : $item['itemUnit'],
+                                    'unitPrice'=> $item['unitPrice'],
+                                ];
+                            }, $doData['detailItem'] ?? []),
+                        ];
+                        if (isset($doData['branch'])) {
+                            $invoicePayload['branch'] = ['id' => $doData['branch']['id']];
+                        }
+ 
+                        $res = $this->accurate->post('sales-invoice/save.do', $invoicePayload);
+                        $accurateResult = $res;
+                    }
+                }
+            } catch (\Exception $e) {
+                Log::error("AUDIT ACCURATE ACTION ERROR: " . $e->getMessage());
+                // Jangan batalkan approve hanya karena API Accurate gagal — tetap approve, simpan error-nya
+                $accurateResult = ['error' => $e->getMessage()];
+            }
+        }
+ 
+        // ── Finalisasi audit di database lokal ──────────────────────────────
+        $audit->update([
+            'status'          => 'approved',
+            'audited_by'      => auth()->user()->name ?? 'Admin',
+            'approved_at'     => now(),
+            'accurate_result' => $accurateResult,
+        ]);
+ 
+        // Tandai pengiriman sebagai sudah diaudit
+        $delivery->update(['status' => 'Selesai & Diaudit']);
+ 
+        Cache::forget('dashboard_data');
+ 
+        $pesan = 'Audit berhasil di-approve!';
+        if ($accurateResult && !isset($accurateResult['error'])) {
+            $pesan .= ' Aksi ke Accurate berhasil dijalankan.';
+        } elseif ($accurateResult && isset($accurateResult['error'])) {
+            $pesan .= ' (Catatan: Aksi Accurate gagal — ' . $accurateResult['error'] . ')';
+        }
+ 
+        return response()->json([
+            'success' => true,
+            'message' => $pesan,
+        ]);
+ 
+    } catch (\Exception $e) {
+        Log::error('APPROVE AUDIT ERROR: ' . $e->getMessage());
+        return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+    }
+}
     
 }
