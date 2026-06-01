@@ -35,12 +35,11 @@ class InventoryController extends Controller
         // 3. Panggil API
         $response = $this->accurate->get('item/list.do', $params);
 
-        // Cek Error Koneksi
-        if (isset($response['status']) && $response['status'] === false) {
-             if ($request->ajax()) {
-                 return response()->json(['error' => 'Koneksi Accurate bermasalah'], 500);
-             }
-             return redirect('/accurate/auth')->with('warning', 'Koneksi Accurate terputus.');
+        if (isset($response['s']) && $response['s'] === false) {
+            if ($request->ajax()) {
+                return response()->json(['error' => 'Koneksi Accurate bermasalah'], 500);
+            }
+            return redirect('/accurate/auth')->with('warning', 'Koneksi Accurate terputus.');
         }
 
         $items = $response['d'] ?? [];
